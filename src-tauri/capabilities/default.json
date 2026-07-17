@@ -1,0 +1,14 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Default capability for the app",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "shell:allow-open",
+    "allow-native-fetch",
+    "allow-send-email",
+    "allow-send-slack",
+    "allow-get-send-config"
+  ]
+}

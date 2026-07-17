@@ -1,0 +1,627 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+    background-color: #F5F7FA;
+    color: #333333;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+    background: #002E5D;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+    background: #004b8d;
+    border-radius: 3px;
+}
+
+/* Feedback Button Animations */
+@keyframes bounce-subtle {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-6px); }
+}
+
+.animate-bounce-subtle {
+    animation: bounce-subtle 2s ease-in-out infinite;
+}
+
+.animate-bounce-subtle:hover {
+    animation-play-state: paused;
+}
+
+@keyframes scale-in {
+    from {
+        opacity: 0;
+        transform: scale(0.95) translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+}
+
+.animate-scale-in {
+    animation: scale-in 0.2s ease-out forwards;
+}
+
+@keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+.animate-fade-in {
+    animation: fade-in 0.3s ease-out forwards;
+}
+
+@keyframes fade-in-up {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.animate-fade-in-up {
+    animation: fade-in-up 0.3s ease-out forwards;
+}
+
+
+/* =========================================================
+   AP Shooter Scoped Styles — Claude-Style Clean UI
+   ========================================================= */
+
+.ap-shooter-scope {
+  --bg-surface: #ffffff;
+  --bg-subtle: #f9fafb;
+  --bg-hover: #f3f4f6;
+
+  --primary: #0f172a;
+  --primary-hover: #1e293b;
+  --primary-subtle: #f1f5f9;
+
+  --accent: #2563eb;
+  --accent-subtle: #eff6ff;
+
+  --secondary: #7c3aed;
+  --bg-base: #f9fafb;
+
+  --text-primary: #111827;
+  --text-secondary: #4b5563;
+  --text-muted: #9ca3af;
+  --text-placeholder: #d1d5db;
+
+  --success: #059669;
+  --success-subtle: #ecfdf5;
+  --error: #dc2626;
+  --error-subtle: #fef2f2;
+  --warning: #d97706;
+  --warning-subtle: #fffbeb;
+  --info: #2563eb;
+  --info-subtle: #eff6ff;
+
+  --border: #e5e7eb;
+  --border-strong: #d1d5db;
+  --border-focus: rgba(15, 23, 42, 0.15);
+
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+
+  --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+
+  font-family: var(--font-family);
+  color: var(--text-primary);
+  line-height: 1.6;
+}
+
+.ap-shooter-scope {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+/* Header */
+.ap-shooter-scope .page-header {
+  margin-bottom: 0.5rem;
+}
+
+.ap-shooter-scope .page-header h1 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+
+.ap-shooter-scope .page-header p {
+  font-size: 0.875rem;
+  color: var(--text-muted);
+  margin: 0.25rem 0 0 0;
+}
+
+/* Card Component */
+.ap-shooter-scope .glass-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 1.5rem;
+}
+
+/* Button Component */
+.ap-shooter-scope .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: var(--radius-md);
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  font-family: var(--font-family);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  border: 1px solid transparent;
+  white-space: nowrap;
+  line-height: 1.5;
+}
+
+.ap-shooter-scope .btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.ap-shooter-scope .btn-primary {
+  background: var(--primary);
+  color: white;
+  border-color: var(--primary);
+}
+
+.ap-shooter-scope .btn-primary:hover:not(:disabled) {
+  background: var(--primary-hover);
+  border-color: var(--primary-hover);
+}
+
+.ap-shooter-scope .btn-secondary {
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  border-color: var(--border);
+}
+
+.ap-shooter-scope .btn-secondary:hover:not(:disabled) {
+  background: var(--bg-subtle);
+  border-color: var(--border-strong);
+}
+
+.ap-shooter-scope .btn-danger {
+  background: var(--error-subtle);
+  border-color: #fecaca;
+  color: var(--error);
+}
+
+.ap-shooter-scope .btn-danger:hover:not(:disabled) {
+  background: #fee2e2;
+}
+
+/* Inputs and Forms */
+.ap-shooter-scope .form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.ap-shooter-scope .form-label {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.ap-shooter-scope .input-text,
+.ap-shooter-scope .textarea {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 0.5rem 0.75rem;
+  font-family: var(--font-family);
+  color: var(--text-primary);
+  font-size: 0.875rem;
+  transition: all 0.15s ease;
+  width: 100%;
+  line-height: 1.5;
+}
+
+.ap-shooter-scope .input-text::placeholder,
+.ap-shooter-scope .textarea::placeholder {
+  color: var(--text-placeholder);
+}
+
+.ap-shooter-scope input[type="date"] {
+  color-scheme: light;
+  color: var(--text-primary);
+}
+
+.ap-shooter-scope input[type="date"]::-webkit-calendar-picker-indicator {
+  opacity: 0.5;
+  cursor: pointer;
+}
+
+.ap-shooter-scope .input-text:focus,
+.ap-shooter-scope .textarea:focus {
+  border-color: var(--border-strong);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--border-focus);
+}
+
+.ap-shooter-scope .textarea {
+  resize: vertical;
+  min-height: 120px;
+}
+
+/* Select styling */
+.ap-shooter-scope select.input-text {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%239ca3af' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.625rem center;
+  padding-right: 2rem;
+}
+
+/* Columns / Grid Layouts */
+.ap-shooter-scope .grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.25rem;
+}
+
+@media (max-width: 768px) {
+  .ap-shooter-scope .grid-2 {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Micro Animations */
+@keyframes ap-fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes ap-spin {
+  to { transform: rotate(360deg); }
+}
+
+.ap-shooter-scope .animated-fade-in {
+  animation: ap-fadeIn 0.3s ease-out forwards;
+}
+
+/* Step Indicator — Tab Bar Style */
+.ap-shooter-scope .step-bar {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-surface);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  padding: 0 0.5rem;
+  overflow-x: auto;
+}
+
+.ap-shooter-scope .step-tab {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.875rem 1.25rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  white-space: nowrap;
+  cursor: not-allowed;
+  transition: all 0.15s ease;
+  background: none;
+  border-top: none;
+  border-left: none;
+  border-right: none;
+  font-family: var(--font-family);
+}
+
+.ap-shooter-scope .step-tab.selectable {
+  cursor: pointer;
+  color: var(--text-secondary);
+}
+
+.ap-shooter-scope .step-tab.selectable:hover {
+  color: var(--text-primary);
+  background: var(--bg-subtle);
+}
+
+.ap-shooter-scope .step-tab.active {
+  color: var(--text-primary);
+  border-bottom-color: var(--primary);
+  font-weight: 600;
+}
+
+.ap-shooter-scope .step-tab.completed {
+  color: var(--success);
+}
+
+.ap-shooter-scope .step-tab.completed.active {
+  color: var(--text-primary);
+  border-bottom-color: var(--primary);
+}
+
+/* Table Style */
+.ap-shooter-scope .table-container {
+  overflow-x: auto;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+}
+
+.ap-shooter-scope .data-table {
+  width: 100%;
+  min-width: max-content;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 0.8125rem;
+}
+
+.ap-shooter-scope .data-table th {
+  background: var(--bg-subtle);
+  padding: 0.625rem 0.875rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+  font-size: 0.6875rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.ap-shooter-scope .data-table td {
+  padding: 0.625rem 0.875rem;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+  vertical-align: middle;
+  white-space: nowrap;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ap-shooter-scope .data-table tr:last-child td {
+  border-bottom: none;
+}
+
+.ap-shooter-scope .data-table tr:hover td {
+  background: var(--bg-subtle);
+}
+
+/* Badges */
+.ap-shooter-scope .badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 9999px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.ap-shooter-scope .badge-success {
+  background: var(--success-subtle);
+  color: var(--success);
+}
+
+.ap-shooter-scope .badge-error {
+  background: var(--error-subtle);
+  color: var(--error);
+}
+
+.ap-shooter-scope .badge-info {
+  background: var(--info-subtle);
+  color: var(--info);
+}
+
+.ap-shooter-scope .badge-warning {
+  background: var(--warning-subtle);
+  color: var(--warning);
+}
+
+/* Upload Area */
+.ap-shooter-scope .uploader-area {
+  border: 1.5px dashed var(--border);
+  border-radius: var(--radius-lg);
+  padding: 2.5rem 2rem;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: var(--bg-subtle);
+}
+
+.ap-shooter-scope .uploader-area:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-hover);
+}
+
+.ap-shooter-scope .uploader-area.dragging {
+  border-color: var(--accent);
+  background: var(--accent-subtle);
+}
+
+.ap-shooter-scope .uploader-icon {
+  color: var(--text-muted);
+  margin-bottom: 0.75rem;
+}
+
+.ap-shooter-scope .uploader-area:hover .uploader-icon,
+.ap-shooter-scope .uploader-area.dragging .uploader-icon {
+  color: var(--accent);
+}
+
+/* Progress Bar */
+.ap-shooter-scope .progress-bar-container {
+  width: 100%;
+  height: 4px;
+  background: var(--border);
+  border-radius: 9999px;
+  overflow: hidden;
+}
+
+.ap-shooter-scope .progress-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 9999px;
+  transition: width 0.3s ease;
+}
+
+/* Log Console */
+.ap-shooter-scope .log-console {
+  height: 200px;
+  overflow-y: auto;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 0.875rem;
+  font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.ap-shooter-scope .log-line {
+  padding: 0.125rem 0;
+}
+
+.ap-shooter-scope .log-line.success {
+  color: var(--success);
+}
+
+.ap-shooter-scope .log-line.error {
+  color: var(--error);
+}
+
+.ap-shooter-scope .log-line.info {
+  color: var(--info);
+}
+
+/* Metrics Grid */
+.ap-shooter-scope .metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.875rem;
+}
+
+.ap-shooter-scope .metric-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.ap-shooter-scope .metric-label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.ap-shooter-scope .metric-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
+}
+
+/* Email Card */
+.ap-shooter-scope .email-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 1rem;
+  transition: border-color 0.15s ease;
+}
+
+.ap-shooter-scope .email-card:hover {
+  border-color: var(--border-strong);
+}
+
+.ap-shooter-scope .email-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 0.625rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0.625rem;
+}
+
+.ap-shooter-scope .email-recipient {
+  font-weight: 600;
+  font-size: 0.875rem;
+  color: var(--text-primary);
+}
+
+.ap-shooter-scope .email-body {
+  white-space: pre-wrap;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+}
+
+/* Switch / Toggle */
+.ap-shooter-scope .switch-container {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.ap-shooter-scope .switch-control {
+  width: 2.25rem;
+  height: 1.25rem;
+  background: var(--border);
+  border-radius: 9999px;
+  position: relative;
+  transition: background 0.2s ease;
+  flex-shrink: 0;
+}
+
+.ap-shooter-scope .switch-control::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 1rem;
+  height: 1rem;
+  background: white;
+  border-radius: 50%;
+  transition: transform 0.2s ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+.ap-shooter-scope .switch-container.checked .switch-control {
+  background: var(--primary);
+}
+
+.ap-shooter-scope .switch-container.checked .switch-control::after {
+  transform: translateX(1rem);
+}
+
+.ap-shooter-scope .switch-label {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+}

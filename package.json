@@ -1,0 +1,43 @@
+{
+  "name": "pubmatic-validator-dashboard",
+  "private": true,
+  "version": "0.3.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "proxy": "node server/index.js",
+    "clean": "rm -rf dist/ src-tauri/target/ node_modules/",
+    "clean:build": "rm -rf dist/ src-tauri/target/.fingerprint src-tauri/target/release",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "npm run build && tauri build",
+    "tauri:build:arm64": "npm run build && tauri build --target aarch64-apple-darwin",
+    "tauri:build:intel": "npm run build && tauri build --target x86_64-apple-darwin",
+    "build:app:arm64": "node scripts/build-app.cjs aarch64-apple-darwin",
+    "build:app:intel": "node scripts/build-app.cjs x86_64-apple-darwin"
+  },
+  "dependencies": {
+    "lucide-react": "^0.556.0",
+    "papaparse": "^5.5.3",
+    "react": "^19.2.1",
+    "react-dom": "^19.2.1",
+    "react-router-dom": "^7.10.1",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.18",
+    "@tauri-apps/api": "^2.11.0",
+    "@tauri-apps/cli": "^2.11.2",
+    "@types/node": "^22.14.0",
+    "@types/papaparse": "^5.5.2",
+    "@vitejs/plugin-react": "^5.0.0",
+    "autoprefixer": "^10.4.23",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^4.1.18",
+    "terser": "^5.49.0",
+    "typescript": "~5.8.2",
+    "vite": "^6.2.0"
+  }
+}

@@ -1,0 +1,16 @@
+{
+    "name": "gck-automation-server",
+    "version": "0.3.0",
+    "description": "Dev-mode backend for GCK Automation: CORS proxy + email/Slack sending",
+    "main": "index.js",
+    "type": "module",
+    "scripts": {
+        "start": "node index.js"
+    },
+    "dependencies": {
+        "cors": "^2.8.5",
+        "express": "^4.18.2",
+        "node-fetch": "^3.3.2",
+        "nodemailer": "^6.9.14"
+    }
+}

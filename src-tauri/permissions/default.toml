@@ -1,0 +1,19 @@
+[[permission]]
+identifier = "allow-native-fetch"
+description = "Enables the native_fetch command for bypass requests."
+commands.allow = ["native_fetch"]
+
+[[permission]]
+identifier = "allow-send-email"
+description = "Enables the send_email command (SMTP report sending for Discrepancy Check-in)."
+commands.allow = ["send_email"]
+
+[[permission]]
+identifier = "allow-send-slack"
+description = "Enables the send_slack command (Slack report posting for Discrepancy Check-in)."
+commands.allow = ["send_slack"]
+
+[[permission]]
+identifier = "allow-get-send-config"
+description = "Enables the get_send_config command (reports which sending credentials are embedded; never returns secrets)."
+commands.allow = ["get_send_config"]
