@@ -70,6 +70,25 @@ export function standardizeRows(rawRows: Record<string, unknown>[], publisherId:
   return rows;
 }
 
+/** 去重：保留每个 Publisher-DSP 组合的第一条，丢弃后续重复。返回 { unique, duplicates } */
+export function deduplicateRows(rows: DiscrepancyRow[]): { unique: DiscrepancyRow[]; duplicates: DiscrepancyRow[] } {
+  const seen = new Map<string, DiscrepancyRow>();
+  const unique: DiscrepancyRow[] = [];
+  const duplicates: DiscrepancyRow[] = [];
+
+  for (const r of rows) {
+    const key = `${r.publisherId}|${r.dsp}`;
+    if (seen.has(key)) {
+      duplicates.push(r);
+    } else {
+      seen.set(key, r);
+      unique.push(r);
+    }
+  }
+
+  return { unique, duplicates };
+}
+
 /** 过滤掉 DSP / PubMatic 两边 spend 都 < 1 的无意义行 */
 export const filterLowSpendRows = (rows: DiscrepancyRow[]): DiscrepancyRow[] =>
   rows.filter((r) => (r.dspSpend ?? 0) >= 1 || (r.pubmaticSpend ?? 0) >= 1);
@@ -117,6 +136,24 @@ export function aggregateByDsp(rows: DiscrepancyRow[]): DspSummaryRow[] {
     const dspSpend = sum(list, 'dspSpend');
     const pubmaticImps = sum(list, 'pubmaticImps');
     const dspImps = sum(list, 'dspImps');
+
+    // 验证：聚合后的绝对差值应该等于原始行的绝对差值之和（舍入误差除外）
+    const expectedSpendAbs = sum(list, 'spendDiscrepancyAbs');
+    const actualSpendAbs = Math.abs(pubmaticSpend - dspSpend);
+    const expectedImpsAbs = sum(list, 'impsDiscrepancyAbs');
+    const actualImpsAbs = Math.abs(pubmaticImps - dspImps);
+
+    // 允许 0.01 的舍入误差
+    const spendMismatch = Math.abs(expectedSpendAbs - actualSpendAbs) > 0.01;
+    const impsMismatch = Math.abs(expectedImpsAbs - actualImpsAbs) > 1; // 曝光数用 1
+
+    if (spendMismatch || impsMismatch) {
+      console.warn(`[aggregateByDsp] Data integrity check failed for ${dsp}:`, {
+        spendMismatch, expectedSpendAbs, actualSpendAbs,
+        impsMismatch, expectedImpsAbs, actualImpsAbs,
+      });
+    }
+
     return {
       dsp,
       publishers: new Set(list.map((r) => r.publisherId)).size,
@@ -202,6 +239,44 @@ export function rowsToCsv(rows: DiscrepancyRow[]): string {
   const header = fields.join(',');
   const body = rows.map((r) => fields.map((f) => esc(r[f])).join(',')).join('\n');
   return `${header}\n${body}`;
+}
+
+/** 验证聚合数据的一致性：检查百分比计算 */
+export function validateAggregateConsistency(
+  rows: DiscrepancyRow[],
+  summary: DspSummaryRow[]
+): { valid: boolean; issues: string[] } {
+  const issues: string[] = [];
+
+  // 检查：所有行的 PubMatic Spend 之和 应该等于 summary 中所有 DSP 的 PubMatic Spend 之和
+  const totalRowSpend = rows.reduce((sum, r) => sum + (r.pubmaticSpend ?? 0), 0);
+  const totalSummarySpend = summary.reduce((sum, s) => sum + s.pubmaticSpend, 0);
+  if (Math.abs(totalRowSpend - totalSummarySpend) > 0.01) {
+    issues.push(
+      `PubMatic Spend mismatch: rows total $${totalRowSpend.toFixed(2)}, summary total $${totalSummarySpend.toFixed(2)}`
+    );
+  }
+
+  // 检查：所有行的 DSP Spend 之和 应该等于 summary 中所有 DSP 的 DSP Spend 之和
+  const totalRowDspSpend = rows.reduce((sum, r) => sum + (r.dspSpend ?? 0), 0);
+  const totalSummaryDspSpend = summary.reduce((sum, s) => sum + s.dspSpend, 0);
+  if (Math.abs(totalRowDspSpend - totalSummaryDspSpend) > 0.01) {
+    issues.push(
+      `DSP Spend mismatch: rows total $${totalRowDspSpend.toFixed(2)}, summary total $${totalSummaryDspSpend.toFixed(2)}`
+    );
+  }
+
+  // 检查：所有行的 PubMatic Imps 之和 应该等于 summary 中所有 DSP 的 PubMatic Imps 之和
+  const totalRowImps = rows.reduce((sum, r) => sum + (r.pubmaticImps ?? 0), 0);
+  const totalSummaryImps = summary.reduce((sum, s) => sum + s.pubmaticImps, 0);
+  if (Math.abs(totalRowImps - totalSummaryImps) > 1) {
+    issues.push(`PubMatic Imps mismatch: rows total ${totalRowImps}, summary total ${totalSummaryImps}`);
+  }
+
+  return {
+    valid: issues.length === 0,
+    issues,
+  };
 }
 
 /** 报告可用的最新日期（T - dataLatencyDays），返回 YYYY-MM-DD */

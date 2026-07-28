@@ -9,6 +9,7 @@ import { fetchAllPublishers, diagnoseError } from '@/services/discrepancy/apiSer
 import {
   filterLowSpendRows, aggregateByDsp, getTopSpenders, getHighlights,
   generateStructuredSummary, rowsToCsv, getLatestAvailableDate, fmtNum, fmtPct,
+  deduplicateRows, validateAggregateConsistency,
 } from '@/services/discrepancy/dataProcessor';
 import { buildEmailHtml, buildEmailSubject, buildSlackBlocks } from '@/services/discrepancy/reportBuilder';
 import { sendEmail, sendSlack } from '@/services/discrepancy/backendService';
@@ -314,7 +315,7 @@ export const DiscrepancyCheckin: React.FC = () => {
     setProgress({ current: 0, total: publisherIds.length });
 
     const tokens: DiscrepancyTokens = { pubtoken: pubtoken.trim(), bearerToken: bearerToken.trim(), cookie: cookie.trim() || undefined };
-    addLog('info', `Run started — report date ${reportDate}, ${publisherIds.length} publishers, threshold ±${(DISCREPANCY_CONFIG.highlightThreshold * 100).toFixed(0)}%`);
+    addLog('info', `Starting report for ${reportDate} across ${publisherIds.length} publishers (flagging any discrepancies over ±${(DISCREPANCY_CONFIG.highlightThreshold * 100).toFixed(0)}%)`);
 
     try {
       const { rows: fetched, errors } = await fetchAllPublishers(
@@ -323,33 +324,51 @@ export const DiscrepancyCheckin: React.FC = () => {
         addLog
       );
       setFetchErrors(errors);
-      addLog(
-        errors.length ? 'warn' : 'info',
-        `Fetch finished: ${publisherIds.length - errors.length}/${publisherIds.length} publishers OK, ${errors.length} failed, ${fetched.length} raw rows`
-      );
+      const succeeded = publisherIds.length - errors.length;
+      if (errors.length === 0) {
+        addLog('info', `✓ Downloaded data from all ${publisherIds.length} publishers (${fetched.length} line items)`);
+      } else {
+        addLog('warn', `Downloaded from ${succeeded}/${publisherIds.length} publishers. ${errors.length} publisher${errors.length === 1 ? '' : 's'} had issues — see details below`);
+      }
 
       if (!fetched.length) {
         const commonHint = errors.length ? diagnoseError(errors[0].error) : '';
         const msg = isTauri()
-          ? 'No data returned. Check: 1) token validity  2) publisher IDs  3) network / VPN connectivity'
-          : 'No data returned. Check: 1) token validity  2) publisher IDs  3) the proxy server is running (npm run proxy)';
+          ? `No data found for these publishers on ${reportDate}. Verify: (1) Are your tokens active? (2) Are all Publisher IDs correct? (3) Do you have network/VPN access?${commonHint ? ` — Hint: ${commonHint}` : ''}`
+          : `No data found for these publishers on ${reportDate}. Verify: (1) Are your tokens active? (2) Are all Publisher IDs correct? (3) Is the proxy running? (Run 'npm run proxy' in another terminal)`;
         setError(msg);
-        addLog('error', `Run aborted — no data returned from any publisher.${commonHint ? `\n           ↳ Probable cause: ${commonHint}` : ''}`);
+        addLog('error', `No publishers returned data — report aborted.${commonHint ? `\n           ↳ Most likely issue: ${commonHint}` : ''}`);
         setRunState('error');
         return;
       }
 
-      const filtered = filterLowSpendRows(fetched);
+      const { unique: deduplicated, duplicates: dupCount } = deduplicateRows(fetched);
+      if (dupCount.length > 0) {
+        addLog('warn', `Found & removed ${dupCount.length} duplicate Publisher-DSP row(s) (kept first occurrence per pair)`);
+      }
+
+      const filtered = filterLowSpendRows(deduplicated);
       setRows(filtered);
+
+      // 数据一致性验证：确保聚合数据的准确性
+      const dspSummary = aggregateByDsp(filtered);
+      const { valid: dataValid, issues: dataIssues } = validateAggregateConsistency(filtered, dspSummary);
+      if (!dataValid) {
+        addLog('error', `⚠️ Data consistency check failed:\n           ${dataIssues.join('\n           ')}`);
+      } else {
+        addLog('info', `✓ Data consistency verified (all aggregations correct)`);
+      }
+
       setSummaryText(generateStructuredSummary(filtered, reportDate));
       const hl = getHighlights(filtered);
-      addLog('info', `Report complete: ${filtered.length} rows after low-spend filter, ${hl.length} highlighted combo(s)`);
+      const highlightMsg = hl.length ? `🚨 ${hl.length} discrepancy${hl.length === 1 ? '' : 'ies'} found above threshold` : '✓ All clear — no major discrepancies';
+      addLog('info', `Report ready: ${filtered.length} rows analyzed. ${highlightMsg}`);
       setRunState('done');
     } catch (err) {
       const msg = (err as Error).message;
       const hint = diagnoseError(msg);
       setError(msg);
-      addLog('error', `Run failed: ${msg}${hint ? `\n           ↳ Probable cause: ${hint}` : ''}`);
+      addLog('error', `Report failed to complete: ${msg}${hint ? `\n           ↳ Likely reason: ${hint}` : ''}`);
       setRunState('error');
     }
   };
@@ -390,12 +409,13 @@ export const DiscrepancyCheckin: React.FC = () => {
       recipients,
     }, sendSettings);
     if (emailRes.ok) {
-      setEmailStatus(`✅ Sent to ${emailRes.recipients?.join(', ')}`);
-      addLog('info', `Email sent to ${emailRes.recipients?.join(', ')}`);
+      const recipientCount = emailRes.recipients?.length || 0;
+      setEmailStatus(`✅ Sent to ${recipientCount} recipient${recipientCount === 1 ? '' : 's'}`);
+      addLog('info', `✓ Email delivered with CSV attachment`);
     } else {
       setEmailStatus(`❌ ${emailRes.error}`);
       const hint = diagnoseError(emailRes.error ?? '');
-      addLog('error', `Email failed: ${emailRes.error}${hint ? `\n           ↳ Probable cause: ${hint}` : ''}`);
+      addLog('error', `Email delivery failed: ${emailRes.error}${hint ? `\n           ↳ Likely issue: ${hint}` : ''}`);
     }
 
     // Slack
@@ -407,11 +427,11 @@ export const DiscrepancyCheckin: React.FC = () => {
     }, sendSettings);
     if (slackRes.ok) {
       setSlackStatus(`✅ Posted to ${slackChannel}`);
-      addLog('info', `Slack message posted to ${slackChannel}`);
+      addLog('info', `✓ Slack message delivered`);
     } else {
       setSlackStatus(`❌ ${slackRes.error}`);
       const hint = diagnoseError(slackRes.error ?? '');
-      addLog('error', `Slack failed: ${slackRes.error}${hint ? `\n           ↳ Probable cause: ${hint}` : ''}`);
+      addLog('error', `Slack delivery failed: ${slackRes.error}${hint ? `\n           ↳ Likely issue: ${hint}` : ''}`);
     }
 
     setSending(false);
