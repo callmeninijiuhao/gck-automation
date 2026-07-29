@@ -301,6 +301,142 @@ body {
   animation: ap-fadeIn 0.3s ease-out forwards;
 }
 
+/* Numbered section header (Bundle Level Analysis) */
+.ap-shooter-scope .section-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.ap-shooter-scope .section-num {
+  flex-shrink: 0;
+  width: 1.75rem;
+  height: 1.75rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-md);
+  background: var(--primary);
+  color: #fff;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.ap-shooter-scope .section-title {
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+
+.ap-shooter-scope .section-sub {
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  margin: 0.2rem 0 0;
+  max-width: 68ch;
+}
+
+/* Import source tiles */
+.ap-shooter-scope .import-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+@media (max-width: 640px) {
+  .ap-shooter-scope .import-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.ap-shooter-scope .import-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+  padding: 1.25rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-subtle);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.ap-shooter-scope .import-tile:hover {
+  border-color: var(--border-strong);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+}
+
+.ap-shooter-scope .import-tile-icon {
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: var(--radius-md);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+}
+
+.ap-shooter-scope .import-tile h3 {
+  font-size: 0.9rem;
+  font-weight: 600;
+  margin: 0;
+}
+
+.ap-shooter-scope .import-tile-desc {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin: 0;
+  flex: 1;
+  line-height: 1.55;
+}
+
+/* Loaded-source status bar */
+.ap-shooter-scope .source-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.625rem 0.875rem;
+  border: 1px solid #c7ddf5;
+  border-radius: var(--radius-md);
+  background: var(--accent-subtle);
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+}
+
+/* KPI stat tiles */
+.ap-shooter-scope .stat-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.75rem;
+}
+
+.ap-shooter-scope .stat-tile {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 0.875rem 1rem;
+  background: var(--bg-subtle);
+}
+
+.ap-shooter-scope .stat-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.ap-shooter-scope .stat-value {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  margin-top: 0.25rem;
+}
+
 /* Step Indicator — Tab Bar Style */
 .ap-shooter-scope .step-bar {
   display: flex;

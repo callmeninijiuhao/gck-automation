@@ -119,6 +119,17 @@ const ManagedList: React.FC<{
   );
 };
 
+/** Numbered / titled section header. */
+const SectionHead: React.FC<{ n?: number; title: string; children?: React.ReactNode }> = ({ n, title, children }) => (
+  <div className="section-head">
+    {n != null && <span className="section-num">{n}</span>}
+    <div>
+      <h2 className="section-title">{title}</h2>
+      {children && <p className="section-sub">{children}</p>}
+    </div>
+  </div>
+);
+
 /** Generic aggregated-table renderer. */
 const AggTable: React.FC<{
   rows: AggRow[];
@@ -181,6 +192,7 @@ export const TopBundleAnalysis: React.FC = () => {
   // ── sending (reuses Discrepancy's validated email config) ──
   const [sending, setSending] = useState(false);
   const [emailStatus, setEmailStatus] = useState('');
+  const [emailOk, setEmailOk] = useState<boolean | null>(null);
   const sendSettings = useMemo<AppSendSettings>(() => {
     try { const saved = localStorage.getItem(SEND_SETTINGS_KEY); if (saved) return { ...DEFAULT_SEND_SETTINGS, ...JSON.parse(saved) }; } catch { /* ignore */ }
     return { ...DEFAULT_SEND_SETTINGS };
@@ -284,7 +296,7 @@ export const TopBundleAnalysis: React.FC = () => {
       addLog('info', `Generating AI narrative via PubMatic Brain (${llmConfig.environment}, ${llmConfig.model})...`);
       try {
         const narrative = await generateNarrative(localSummaries, localMetrics, reportDate, llmConfig, dod);
-        if (narrative.trim()) { setSummaryText(narrative.trim()); addLog('info', '✓ AI narrative generated'); }
+        if (narrative.trim()) { setSummaryText(narrative.trim()); addLog('info', 'AI narrative generated'); }
         else addLog('warn', 'AI returned an empty narrative — keeping the structured summary.');
       } catch (e) {
         addLog('warn', `AI narrative unavailable (${(e as Error).message.slice(0, 150)}) — keeping the structured summary.`);
@@ -300,10 +312,10 @@ export const TopBundleAnalysis: React.FC = () => {
   };
   const handleExportPartner = () => {
     const name = TopBundleExcel.generatePartner(partner, reportDate);
-    addLog('info', `✓ Exported ${name} (${partner.length} rows, bundle + country + eCPM, no spend)`);
+    addLog('info', `Exported ${name} (${partner.length} rows, bundle + country + eCPM, no spend)`);
   };
   const handleSendEmail = async () => {
-    setSending(true); setEmailStatus('');
+    setSending(true); setEmailStatus(''); setEmailOk(null);
     const html = buildEmailHtml(summaries, summaryText, metrics, reportDate, dayOverDay, changeMap);
     const res = await sendEmail({
       subject: buildEmailSubject(reportDate), html,
@@ -312,10 +324,10 @@ export const TopBundleAnalysis: React.FC = () => {
     }, sendSettings);
     if (res.ok) {
       const n = res.recipients?.length ?? recipients.length;
-      setEmailStatus(`✅ Sent to ${n} recipient${n === 1 ? '' : 's'}`);
-      addLog('info', '✓ Internal report emailed with the clean Bundle List to Share (CSV) attached');
+      setEmailStatus(`Sent to ${n} recipient${n === 1 ? '' : 's'}`); setEmailOk(true);
+      addLog('info', 'Internal report emailed with the clean Bundle List to Share (CSV) attached');
     } else {
-      setEmailStatus(`❌ ${res.error}`); addLog('error', `Email failed: ${res.error}`);
+      setEmailStatus(res.error || 'Email failed'); setEmailOk(false); addLog('error', `Email failed: ${res.error}`);
     }
     setSending(false);
   };
@@ -329,49 +341,56 @@ export const TopBundleAnalysis: React.FC = () => {
         <p>Upload the daily Looker export (or auto-fetch from Slack) → analyze mobile in-app bundles by publisher, DSP, ad format &amp; size, country, region and POD → export an internal report and a clean, partner-shareable bundle list.</p>
       </div>
 
-      {/* ── 1. upload ── */}
-      <div className="glass-card animated-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-        <h2 style={{ fontSize: '1.1rem', fontWeight: 600 }}>1. Upload Looker export</h2>
-        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
-          <label className="btn btn-primary" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
-            <Upload size={16} /> Choose CSV / Excel
-            <input type="file" accept=".csv,.tsv,.xlsx,.xls,.xlsm" style={{ display: 'none' }}
-              onChange={(e) => { if (e.target.files?.[0]) { handleFile(e.target.files[0]); e.target.value = ''; } }} />
-          </label>
-          {fileName && <span style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>📄 {fileName} — {parsedRows.length} rows</span>}
-          <div className="form-group" style={{ marginLeft: 'auto', marginBottom: 0 }}>
-            <label className="form-label">Report date (for titles / filenames)</label>
-            <input type="date" className="input-text" value={reportDate} onChange={(e) => setReportDate(e.target.value)} />
-          </div>
-        </div>
-        <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: 0 }}>
-          Point Looker&apos;s scheduled export at a CSV/Excel with per-row Spend + Paid Impressions and the dimensions Bundle, Platform, Ad Format, Publisher, Domain.
-        </p>
+      {/* ── 1. import data ── */}
+      <div className="glass-card animated-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+        <SectionHead n={1} title="Import data">
+          Load the daily Looker export — upload the file directly, or auto-fetch the latest one posted to Slack.
+        </SectionHead>
 
-        <div style={{ borderTop: '1px solid var(--border, #e5e7eb)', paddingTop: '1rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 600, fontSize: '0.9rem' }}>
-            <MessageSquare size={16} /> …or auto-fetch the latest from Slack
+        <div className="import-grid">
+          {/* Option A — manual upload */}
+          <div className="import-tile">
+            <span className="import-tile-icon"><FileSpreadsheet size={18} /></span>
+            <h3>Upload Looker export</h3>
+            <p className="import-tile-desc">
+              CSV or Excel with per-row Spend + Paid Impressions and the dimensions Bundle, Platform, Ad Format, Publisher, Domain.
+            </p>
+            <label className="btn btn-primary" style={{ alignSelf: 'flex-start', cursor: 'pointer' }}>
+              <Upload size={16} /> Choose CSV / Excel
+              <input type="file" accept=".csv,.tsv,.xlsx,.xls,.xlsm" style={{ display: 'none' }}
+                onChange={(e) => { if (e.target.files?.[0]) { handleFile(e.target.files[0]); e.target.value = ''; } }} />
+            </label>
           </div>
-          <div>
-            <button className="btn btn-secondary" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', whiteSpace: 'nowrap' }}
+
+          {/* Option B — Slack auto-fetch */}
+          <div className="import-tile">
+            <span className="import-tile-icon"><MessageSquare size={18} /></span>
+            <h3>Auto-fetch from Slack</h3>
+            <p className="import-tile-desc">
+              Grabs the newest CSV Looker posted to the configured channel (<code>LOOKER_SLACK_CHANNEL</code> in <code>server/.env</code>). The bot needs <code>files:read</code> and must be in the channel.
+            </p>
+            <button className="btn btn-secondary" style={{ alignSelf: 'flex-start' }}
               onClick={handleFetchSlack} disabled={slackFetching}>
               {slackFetching ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
-              {slackFetching ? 'Fetching...' : 'Fetch latest from Slack'}
+              {slackFetching ? 'Fetching…' : 'Fetch latest from Slack'}
             </button>
           </div>
-          <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: 0 }}>
-            Grabs the newest CSV Looker posted to the configured channel — set <code>LOOKER_SLACK_CHANNEL</code> and <code>LOOKER_SLACK_BOT_TOKEN</code> in <code>server/.env</code>. The bot needs <code>files:read</code> (private channels also <code>groups:history</code>) and must be in the channel.
-          </p>
         </div>
+
+        {fileName && (
+          <div className="source-bar">
+            <CheckCircle2 size={16} style={{ color: 'var(--success)', flexShrink: 0 }} />
+            <span><b>{fileName}</b> — {parsedRows.length.toLocaleString()} rows loaded</span>
+          </div>
+        )}
       </div>
 
       {/* ── 2. column mapping ── */}
       {headers.length > 0 && (
         <div className="glass-card animated-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          <h2 style={{ fontSize: '1.1rem', fontWeight: 600 }}>2. Map columns</h2>
-          <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: 0 }}>
+          <SectionHead n={2} title="Map columns">
             Auto-detected from your file — correct anything that&apos;s wrong. <b>Required:</b> Platform, Spend (DSP Spend), and Bundle or Domain. Impressions is optional (eCPM is used to derive it when absent); PMR and Revenue enrich the publisher view.
-          </p>
+          </SectionHead>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '0.75rem' }}>
             {CANONICAL_FIELDS.map((field) => {
               const required = REQUIRED_FIELDS.includes(field);
@@ -404,12 +423,11 @@ export const TopBundleAnalysis: React.FC = () => {
         </div>
       )}
 
-      {/* ── 3. recipients ── */}
+      {/* ── recipients (config, not a pipeline step) ── */}
       <div className="glass-card animated-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-        <h2 style={{ fontSize: '1.1rem', fontWeight: 600 }}>3. Internal Email Recipients ({recipients.length})</h2>
-        <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: 0 }}>
+        <SectionHead title="Email Recipients Management">
           Where the internal analysis (with spend + eCPM) is sent. Uses the email config from Discrepancy Check-in.
-        </p>
+        </SectionHead>
         <ManagedList items={recipients} onChange={setRecipients} defaults={DEFAULT_EMAIL_RECIPIENTS}
           placeholder="Enter email (comma/space separated for bulk add)"
           validate={(v) => (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) ? null : `"${v}" is not a valid email`)} />
@@ -460,11 +478,18 @@ export const TopBundleAnalysis: React.FC = () => {
               </div>
             </div>
 
-            <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap', fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
-              <span>In-app DSP spend: <b>{fmtCurrency(metrics.inAppSpend)}</b></span>
-              <span>PMR (PubMatic rev): <b>{fmtCurrency(metrics.totalPmr)}</b></span>
-              <span>Publisher rev: <b>{fmtCurrency(metrics.totalRevenue)}</b></span>
-              <span>Bundles: <b>{metrics.distinctBundles}</b></span>
+            <div className="stat-row">
+              {[
+                { label: 'In-app DSP spend', value: fmtCurrency(metrics.inAppSpend) },
+                { label: 'PMR (PubMatic rev)', value: fmtCurrency(metrics.totalPmr) },
+                { label: 'Publisher rev', value: fmtCurrency(metrics.totalRevenue) },
+                { label: 'Distinct bundles', value: metrics.distinctBundles.toLocaleString() },
+              ].map((s) => (
+                <div className="stat-tile" key={s.label}>
+                  <div className="stat-label">{s.label}</div>
+                  <div className="stat-value">{s.value}</div>
+                </div>
+              ))}
             </div>
 
             <div style={{ background: 'var(--bg-subtle, #f5f5f5)', borderLeft: '4px solid var(--primary)', padding: '1rem', borderRadius: '0 0.5rem 0.5rem 0' }}>
@@ -478,7 +503,12 @@ export const TopBundleAnalysis: React.FC = () => {
                 {sending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
                 {sending ? 'Sending...' : 'Email internal report'}
               </button>
-              {emailStatus && <span style={{ fontSize: '0.8125rem' }}>{emailStatus}</span>}
+              {emailStatus && (
+                <span style={{ fontSize: '0.8125rem', display: 'inline-flex', alignItems: 'center', gap: '0.375rem', color: emailOk ? 'var(--success)' : 'var(--error)' }}>
+                  {emailOk ? <CheckCircle2 size={15} /> : <AlertTriangle size={15} />}
+                  {emailStatus}
+                </span>
+              )}
             </div>
             <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: 0 }}>
               Email body = the internal analysis (with spend) for the team. Attached is the clean Bundle List to Share (bundle + country + eCPM, no spend) that you can forward to partners.
