@@ -34,3 +34,8 @@ src-tauri/.build-secrets.env
 release/
 
 CHANGELOG.md
+
+# Local data files & generated reports (never commit — may contain real spend/publisher data)
+*.csv
+*.xlsx
+*.xls

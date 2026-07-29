@@ -251,7 +251,8 @@ export async function fetchAllPublishers(
       if (!pubId) break;
       try {
         const r = await fetchDiscrepancyData(pubId, fromDate, toDate, tokens, onLog);
-        rows.push(...r);
+        // Loop-push (not `rows.push(...r)`): spreading a large array overflows the call stack.
+        for (let i = 0; i < r.length; i++) rows.push(r[i]);
       } catch (err) {
         const msg = (err as Error).message;
         errors.push({ publisherId: pubId, error: msg });

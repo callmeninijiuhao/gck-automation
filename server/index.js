@@ -230,6 +230,93 @@ app.post('/api/slack', async (req, res) => {
     }
 });
 
+// POST /api/llm — proxy to the PubMatic Brain API (OpenAI-compatible chat).
+// The Bearer key lives in server/.env (BRAIN_LLM_API_KEY) and NEVER reaches the browser.
+// Non-prod keys (…-dev-stage / …-cicd-stage) must use the stage endpoint.
+app.post('/api/llm', async (req, res) => {
+    const key = process.env.BRAIN_LLM_API_KEY;
+    // Default to the non-prod (stage) instance for dev/CICD usage.
+    const endpoint = process.env.BRAIN_LLM_ENDPOINT || 'https://stagellm.pubmatic.com/v1/chat/completions';
+    if (!key) {
+        return res.status(200).json({ ok: false, error: 'BRAIN_LLM_API_KEY not configured on server (server/.env)' });
+    }
+    const { model, messages, temperature, max_tokens } = req.body || {};
+    if (!model || !messages) return res.status(400).json({ ok: false, error: 'Missing "model" or "messages"' });
+
+    try {
+        const headers = {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${key}`,
+        };
+        // Optional Langfuse tracing (only sent if configured).
+        if (process.env.LANGFUSE_TRACE_METADATA) headers['langfuse_trace_metadata'] = process.env.LANGFUSE_TRACE_METADATA;
+        if (process.env.LANGFUSE_TRACE_USER_ID) headers['langfuse_trace_user_id'] = process.env.LANGFUSE_TRACE_USER_ID;
+
+        // Only forward temperature if the caller explicitly set one — newer Claude
+        // models on Brain reject `temperature` (deprecated).
+        const payload = { model, messages };
+        if (temperature !== undefined && temperature !== null) payload.temperature = temperature;
+        if (max_tokens !== undefined && max_tokens !== null) payload.max_tokens = max_tokens;
+        const upstream = await fetch(endpoint, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(payload),
+        });
+        const text = await upstream.text();
+        if (!upstream.ok) {
+            console.error(`[LLM] Upstream ${upstream.status} for ${endpoint}: ${text.slice(0, 300)}`);
+            return res.status(200).json({ ok: false, error: `HTTP ${upstream.status}: ${text.slice(0, 300)}` });
+        }
+        res.setHeader('Content-Type', upstream.headers.get('content-type') || 'application/json');
+        res.send(text);
+    } catch (err) {
+        console.error('[LLM] Failed:', err.message);
+        res.status(200).json({ ok: false, error: err.message });
+    }
+});
+
+// GET /api/slack/looker-latest?channel=<id>&match=<substr>
+// Finds the newest CSV file Looker posted to a Slack channel and returns its text.
+// Uses SLACK_BOT_TOKEN (server/.env) — needs files:read (private: groups:history) and
+// the bot must be a member of the channel. Token never reaches the browser.
+app.get('/api/slack/looker-latest', async (req, res) => {
+    // Dedicated app/token for the Looker channel (separate from the Discrepancy bot).
+    // Falls back to SLACK_BOT_TOKEN if a dedicated one isn't set.
+    const token = process.env.LOOKER_SLACK_BOT_TOKEN || process.env.SLACK_BOT_TOKEN;
+    if (!token) return res.status(200).json({ ok: false, error: 'LOOKER_SLACK_BOT_TOKEN not configured on server (server/.env)' });
+    // Channel/match come from the request, falling back to server/.env defaults.
+    const channel = String(req.query.channel || process.env.LOOKER_SLACK_CHANNEL || '').trim();
+    const match = String(req.query.match || process.env.LOOKER_SLACK_MATCH || '').trim().toLowerCase();
+    if (!channel) return res.status(400).json({ ok: false, error: 'No channel — set LOOKER_SLACK_CHANNEL in server/.env or pass ?channel=' });
+
+    try {
+        const listResp = await fetch(`https://slack.com/api/files.list?channel=${encodeURIComponent(channel)}&count=100`, {
+            headers: { Authorization: `Bearer ${token}` },
+        });
+        const list = await listResp.json();
+        if (!list.ok) return res.status(200).json({ ok: false, error: `Slack files.list: ${list.error}` });
+
+        const csvFiles = (list.files || []).filter((f) =>
+            (f.filetype === 'csv' || String(f.name || '').toLowerCase().endsWith('.csv'))
+            && (!match || String(f.name || '').toLowerCase().includes(match)));
+        if (!csvFiles.length) return res.status(200).json({ ok: false, error: 'No matching CSV file found in that channel' });
+        csvFiles.sort((a, b) => (b.created || 0) - (a.created || 0));
+        const file = csvFiles[0];
+
+        const dl = await fetch(file.url_private_download || file.url_private, {
+            headers: { Authorization: `Bearer ${token}` },
+        });
+        const csv = await dl.text();
+        if (!dl.ok) return res.status(200).json({ ok: false, error: `Download failed: HTTP ${dl.status}` });
+
+        console.log(`[Slack] Fetched Looker file "${file.name}" from ${channel} (${csv.length} bytes)`);
+        res.json({ ok: true, filename: file.name || 'looker.csv', createdAt: file.created || null, csv });
+    } catch (err) {
+        console.error('[Slack] looker-latest failed:', err.message);
+        res.status(200).json({ ok: false, error: err.message });
+    }
+});
+
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`Proxy server running on port ${PORT}`);
 });

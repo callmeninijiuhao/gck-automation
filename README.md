@@ -7,7 +7,7 @@ Internal dashboard for PubMatic's **Publisher Development** and **Customer Succe
 | Section | Tool | What it does |
 |---|---|---|
 | PUB DEV | **Pub Onboarding Validator** | Crawls Google Play / App Store from a URL/Bundle ID, discovers the developer's apps, validates `app-ads.txt` against IAB standards |
-| CUSTOMER SUCCESS | **Domain Level Revenue Intelligence** | Publisher revenue analytics by domain/DSP with pivot views and Excel export |
+| CUSTOMER SUCCESS | **Top Bundle & Domain Analysis** | Fetches top-DSP analytics exports; aggregates mobile in-app bundles, web/mweb & CTV; exports an internal report (spend + eCPM) and a clean, partner-shareable bundle list |
 | CUSTOMER SUCCESS | **Seller Domain Shooter** | Searches a competitor's `sellers.json` for a publisher entity to verify supply path presence |
 | CUSTOMER SUCCESS | **Auction Package Analyzer** | Audits publisher monetizing packages against wanted deal distributions |
 | CUSTOMER SUCCESS | **Discrepancy Check-in** | Daily DSP Discrepancy report: fetch → aggregate → highlight ±5% → one-click Email + Slack. Replaces the Python `daily_report.py` workflow |

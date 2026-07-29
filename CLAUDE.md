@@ -11,7 +11,7 @@ Five tools, grouped in the sidebar (`constants.tsx` → `NAV_STRUCTURE`):
 | Section | Tool | Route | Page |
 |---|---|---|---|
 | PUB DEV | Pub Onboarding Validator | `/` | `pages/PubOnboardingValidator.tsx` |
-| CUSTOMER SUCCESS | Domain Level Revenue Intelligence | `/domain-revenue-intelligence` | `pages/DomainRevenueIntelligence.tsx` |
+| CUSTOMER SUCCESS | Top Bundle & Domain Analysis | `/top-bundle-analysis` | `pages/TopBundleAnalysis.tsx` |
 | CUSTOMER SUCCESS | Seller Domain Shooter | `/seller-domain-shooter` | `pages/Troubleshooter.tsx` |
 | CUSTOMER SUCCESS | Auction Package Analyzer | `/ap-shooter` | `pages/APShooter.tsx` |
 | CUSTOMER SUCCESS | Discrepancy Check-in | `/discrepancy-checkin` | `pages/DiscrepancyCheckin.tsx` |
@@ -68,6 +68,20 @@ Web port of the Python `gck-discrepancy-checkin/daily_report.py` workflow: fetch
 - `services/discrepancy/nativeBridge.ts` — Tauri detection + wrappers for `native_fetch` / `send_email`.
 - `services/discrepancy/defaults.ts` — built-in publisher ID list (165, from `GCK_Publisherlist_Monetizing.xlsx`) and default email recipients. Page edits persist to localStorage (`discrepancy_publisher_ids`, `discrepancy_email_recipients`); "Reset" restores these defaults. To permanently change defaults, edit this file.
 - PubMatic tokens (Pubtoken/Bearer) are pasted per-session in the page and intentionally never persisted.
+
+### Top Bundle & Domain Analysis
+
+**Upload-based** (no live API). The user uploads the daily **Looker scheduled export** (CSV/Excel, already aggregated across DSPs); the tool maps columns, aggregates mobile in-app bundles / web+mweb / CTV, and produces an internal report + a partner-shareable bundle list. Replaces the former Domain Level Revenue Intelligence tool. Page `pages/TopBundleAnalysis.tsx`; services in `services/top-bundle/`.
+
+> History: an earlier version fetched per-DSP from `apps.pubmatic.com/api/analytics/export/dsp/<id>`, but reports were 100k+ rows / multi-minute and the PubToken expired daily. Switched to Looker upload — Looker does the fetch/aggregate/schedule. The API path (`apiService.ts`, `cache.ts`) was removed.
+
+- `fileParser.ts` — `parseFile` (CSV via papaparse / Excel via SheetJS) + `parseCsvText`; `autoMap()` matches headers to canonical fields via alias lists (Looker column names vary, so the page shows an editable mapping). `REQUIRED_FIELDS` = platform, spend, paidImpressions (+ bundle OR domain).
+- `slackFetch.ts` — auto-fetch the latest Looker CSV posted to a Slack channel (Looker "Slack Attachment" schedule). Dual-path: dev → server `GET /api/slack/looker-latest?channel=&match=` (uses `SLACK_BOT_TOKEN`, does `files.list` → newest CSV → download `url_private_download`); desktop → same via `native_fetch` with the Slack token from Discrepancy Sending Settings. Bot needs `files:read` (+ `groups:history` for private) and must be in the channel. Manual upload stays as the fallback.
+- `dataProcessor.ts` — `standardizeMapped(rows, mapping)` builds `BundleRow[]` from the field→column mapping; environment bucketing (`Platform` → in_app/mweb/web/ctv via `PLATFORM_BUCKETS`); `aggregate()`. **eCPM and bid rate are ratios — recomputed from summed totals, never summed/averaged.** iOS numeric bundles are enriched with the `Application` name. If the Looker `Platform` values differ from the expected bucket labels, in-app will be empty — the page logs the distinct Platform values so the buckets can be tuned.
+- `reportBuilder.ts` — internal email HTML (spend + eCPM) + CSV builders.
+- `llmService.ts` — AI narrative via the **PubMatic Brain API** (OpenAI-compatible chat). Dual-path like email: dev/browser POSTs to the server `/api/llm` (key in `server/.env` → `BRAIN_LLM_API_KEY`, endpoint `BRAIN_LLM_ENDPOINT`, default stage); desktop (Tauri) calls the Brain API directly via `native_fetch` with a key entered in the tool's LLM settings (localStorage, never in the bundle). Two instances: stage `stagellm.pubmatic.com` (non-prod keys, dev/CICD) and prod `llm.pubmatic.com`; non-prod → non-prod only. The model gets only compact summaries. On any failure the page falls back to `dataProcessor.generateStructuredSummary` (deterministic).
+- `excelGenerator.ts` — multi-sheet workbook; raw data splits across sheets above Excel's row cap.
+- **Email reuses the Discrepancy tool's validated path** (`discrepancy/backendService.sendEmail` + shared `discrepancy_send_settings`) — no separate email config. The **partner list** (bundles only — no spend/eCPM/DSP) is export-only; never auto-sent.
 
 ## Security Rules
 

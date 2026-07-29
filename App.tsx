@@ -6,7 +6,7 @@ import { PubOnboardingValidator } from './pages/PubOnboardingValidator';
 import { SellerDomainShooter } from './pages/Troubleshooter';
 import { APShooter } from './pages/APShooter';
 import { TokenManager } from './pages/TokenManager';
-import DomainRevenueIntelligence from './pages/DomainRevenueIntelligence';
+import TopBundleAnalysis from './pages/TopBundleAnalysis';
 import { DiscrepancyCheckin } from './pages/DiscrepancyCheckin';
 
 // Placeholder components for other routes
@@ -70,7 +70,7 @@ const InnerLayout: React.FC = () => {
         <main className="p-8 flex-1 overflow-x-hidden">
           <Routes>
             <Route path="/" element={<PubOnboardingValidator />} />
-            <Route path="/domain-revenue-intelligence" element={<DomainRevenueIntelligence />} />
+            <Route path="/top-bundle-analysis" element={<TopBundleAnalysis />} />
             <Route path="/seller-domain-shooter" element={<SellerDomainShooter />} />
             <Route path="/ap-shooter" element={<APShooter />} />
             <Route path="/discrepancy-checkin" element={<DiscrepancyCheckin />} />

@@ -3,7 +3,7 @@ import {
   BarChart3,
   Target,
   Key,
-  TrendingUp,
+  Boxes,
   Scale,
 } from 'lucide-react';
 import { NavItem } from './types';
@@ -26,10 +26,10 @@ export const NAV_STRUCTURE: NavItem[] = [
     label: 'CUSTOMER SUCCESS',
     children: [
       {
-        id: 'domain-revenue-intelligence',
-        label: 'Domain Level Revenue Intelligence',
-        path: '/domain-revenue-intelligence',
-        icon: TrendingUp
+        id: 'top-bundle-analysis',
+        label: 'Bundle Level Analysis',
+        path: '/top-bundle-analysis',
+        icon: Boxes
       },
       {
         id: 'seller-domain-shooter',
