@@ -48,7 +48,9 @@ const ALIASES: Record<CanonicalField, string[]> = {
   ecpm: ['ecpm', 'effective cpm'],
   bundle: ['bundle', 'bundle id', 'app bundle', 'bundleid', 'store bundle', 'domain'],
   platform: ['platform', 'environment', 'inventory type', 'device type', 'media type'],
-  adFormat: ['ad format', 'format', 'creative type', 'ad type'],
+  // The newer Looker schedule delivers "sub_adformat" (Display / Native only, no
+  // "Display + Native" combos) instead of the combined Ad Format — treat both as adFormat.
+  adFormat: ['ad format', 'sub adformat', 'sub ad format', 'subadformat', 'format', 'creative type', 'ad type'],
   adSize: ['ad size', 'size', 'creative size', 'ad dimensions'],
   country: ['country', 'geo', 'country name'],
   dsp: ['dsp', 'demand partner', 'demand partner name', 'buyer', 'dsp name'],
@@ -66,9 +68,26 @@ const norm = (s: string): string =>
 
 export interface ParsedFile { headers: string[]; rows: Record<string, unknown>[]; }
 
-/** Parse raw CSV/TSV text (used by both file upload and Slack auto-fetch). */
-export function parseCsvText(text: string): ParsedFile {
-  const parsed = Papa.parse<Record<string, unknown>>(text.trim(), { header: true, skipEmptyLines: true });
+/** Decide the delimiter for a delimited-text file.
+    The newer Looker Slack schedule delivers TSV (higher row cap than CSV), so we
+    must handle tabs as well as commas. Prefer the file extension when known;
+    otherwise sniff the header line (tabs win only if there are more of them). */
+function detectDelimiter(text: string, filename?: string): string {
+  const name = (filename || '').toLowerCase();
+  if (name.endsWith('.tsv') || name.endsWith('.tab')) return '\t';
+  if (name.endsWith('.csv')) return ',';
+  const firstLine = text.split(/\r?\n/).find((l) => l.trim()) || '';
+  const tabs = (firstLine.match(/\t/g) || []).length;
+  const commas = (firstLine.match(/,/g) || []).length;
+  return tabs > commas ? '\t' : ',';
+}
+
+/** Parse raw CSV/TSV text (used by both file upload and Slack auto-fetch).
+    Pass `filename` when known so the delimiter is picked from the extension. */
+export function parseCsvText(text: string, filename?: string): ParsedFile {
+  const parsed = Papa.parse<Record<string, unknown>>(text.trim(), {
+    header: true, skipEmptyLines: true, delimiter: detectDelimiter(text, filename),
+  });
   const headers = parsed.meta.fields ?? (parsed.data[0] ? Object.keys(parsed.data[0]) : []);
   return { headers, rows: parsed.data };
 }
@@ -84,7 +103,7 @@ export async function parseFile(file: File): Promise<ParsedFile> {
     const headers = rows.length ? Object.keys(rows[0]) : (headerRow ?? []);
     return { headers, rows };
   }
-  return parseCsvText(await file.text());
+  return parseCsvText(await file.text(), file.name);
 }
 
 /** Best-effort header → field mapping. Unmatched fields come back undefined. */

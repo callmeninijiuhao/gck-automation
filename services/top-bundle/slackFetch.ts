@@ -23,13 +23,20 @@ interface SlackFile {
   url_private?: string;
 }
 
-function pickLatestCsv(files: SlackFile[], match: string): SlackFile | null {
+const isTsv = (f: SlackFile): boolean =>
+  f.filetype === 'tsv' || /\.(tsv|tab)$/.test((f.name || '').toLowerCase());
+const isCsv = (f: SlackFile): boolean =>
+  f.filetype === 'csv' || (f.name || '').toLowerCase().endsWith('.csv');
+
+/** Newest Looker data file in the channel. Accepts CSV and TSV; prefers TSV, which
+    the newer schedule uses because it isn't subject to the CSV row cap. */
+function pickLatestExport(files: SlackFile[], match: string): SlackFile | null {
   const m = match.trim().toLowerCase();
-  const csv = files.filter((f) =>
-    (f.filetype === 'csv' || (f.name || '').toLowerCase().endsWith('.csv'))
-    && (!m || (f.name || '').toLowerCase().includes(m)));
-  csv.sort((a, b) => (b.created || 0) - (a.created || 0));
-  return csv[0] ?? null;
+  const data = files.filter((f) =>
+    (isTsv(f) || isCsv(f)) && (!m || (f.name || '').toLowerCase().includes(m)));
+  // TSV first (more complete), then newest by created time.
+  data.sort((a, b) => (isTsv(b) ? 1 : 0) - (isTsv(a) ? 1 : 0) || (b.created || 0) - (a.created || 0));
+  return data[0] ?? null;
 }
 
 export interface SlackFetchResult { filename: string; text: string; }
@@ -48,8 +55,8 @@ export async function fetchLatestFromSlack(
     if (!listRes.ok) throw new Error(`Slack files.list HTTP ${listRes.status}`);
     const list = JSON.parse(listRes.text);
     if (!list.ok) throw new Error(`Slack files.list: ${list.error}`);
-    const file = pickLatestCsv(list.files || [], match);
-    if (!file) throw new Error('No matching CSV file found in that channel.');
+    const file = pickLatestExport(list.files || [], match);
+    if (!file) throw new Error('No matching CSV/TSV file found in that channel.');
     const dl = await nativeFetch(file.url_private_download || file.url_private || '', { headers: auth });
     if (!dl.ok) throw new Error(`Download failed HTTP ${dl.status}`);
     return { filename: file.name || 'looker.csv', text: dl.text };

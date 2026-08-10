@@ -5,6 +5,9 @@
 body {
     background-color: #F5F7FA;
     color: #333333;
+    /* Single app-wide type family — keep in sync with the Tailwind `sans` config
+       (index.html + tailwind.config.js) and .ap-shooter-scope's --font-family. */
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
 .custom-scrollbar::-webkit-scrollbar {

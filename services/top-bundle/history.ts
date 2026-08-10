@@ -78,6 +78,74 @@ export function changeLabel(c: BundleChange | undefined): string {
   return 'flat';
 }
 
+// ─────────────────────────────────────────────
+// Publisher-level day-over-day. Same idea as the bundle snapshots, but keyed by
+// publisher (our customers) instead of bundle — easier to read at a glance since
+// a bundle alone doesn't tell you which publisher it belongs to.
+// ─────────────────────────────────────────────
+const PUB_KEY = 'top_bundle_pub_history_v1';
+const KEEP_PUBS = 100;
+
+export interface PubSnap { publisher: string; spend: number; rank: number; }
+type PubStore = Record<string, PubSnap[]>;
+
+function loadPub(): PubStore {
+  try { return JSON.parse(localStorage.getItem(PUB_KEY) || '{}'); } catch { return {}; }
+}
+function savePub(s: PubStore): void {
+  try { localStorage.setItem(PUB_KEY, JSON.stringify(s)); } catch { /* quota — ignore */ }
+}
+
+const toPubSnaps = (rows: AggRow[], n = KEEP_PUBS): PubSnap[] =>
+  rows.slice(0, n).map((p, i) => ({ publisher: String(p.publisher ?? ''), spend: p.spend, rank: i + 1 }));
+
+export function savePublisherSnapshot(date: string, publishersRanked: AggRow[]): void {
+  const s = loadPub();
+  s[date] = toPubSnaps(publishersRanked);
+  for (const d of Object.keys(s).sort().slice(0, Math.max(0, Object.keys(s).length - KEEP_DAYS))) delete s[d];
+  savePub(s);
+}
+
+export function previousPublisherSnapshot(beforeDate: string): { date: string; snap: PubSnap[] } | null {
+  const s = loadPub();
+  const prior = Object.keys(s).filter((d) => d < beforeDate).sort();
+  const d = prior[prior.length - 1];
+  return d ? { date: d, snap: s[d] } : null;
+}
+
+export interface PublisherChange {
+  publisher: string;
+  spend: number;
+  status: 'new' | 'up' | 'down' | 'flat';
+  spendDeltaPct: number | null;   // null for new / no prior spend
+}
+
+export interface PublisherDayOverDay {
+  prevDate: string;
+  topN: number;
+  rows: PublisherChange[];
+}
+
+/** Diff today's top-N publishers by spend against a prior snapshot.
+    Returns null when there is no prior day on record. */
+export function diffPublishers(
+  todayRanked: AggRow[],
+  prev: { date: string; snap: PubSnap[] } | null,
+  topN = 20,
+): PublisherDayOverDay | null {
+  if (!prev) return null;
+  const prevSpend = new Map(prev.snap.map((p) => [p.publisher, p.spend]));
+  const rows: PublisherChange[] = todayRanked.slice(0, topN).map((p) => {
+    const key = String(p.publisher ?? '');
+    const ps = prevSpend.get(key);
+    if (ps === undefined) return { publisher: key, spend: p.spend, status: 'new', spendDeltaPct: null };
+    if (ps <= 0) return { publisher: key, spend: p.spend, status: 'flat', spendDeltaPct: null };
+    const d = (p.spend - ps) / ps;
+    return { publisher: key, spend: p.spend, status: Math.abs(d) < 0.02 ? 'flat' : d > 0 ? 'up' : 'down', spendDeltaPct: d };
+  });
+  return { prevDate: prev.date, topN, rows };
+}
+
 /** Diff today's ranked top-N in-app bundles against a prior snapshot. */
 export function diffTopN(todayRanked: AggRow[], prev: { date: string; snap: BundleSnap[] }, topN = 50): DayOverDay {
   const today = toSnaps(todayRanked, topN);

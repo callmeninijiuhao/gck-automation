@@ -7,7 +7,7 @@ import { AggRow, PartnerRow } from './types';
 import {
   AnalysisMetrics, AdFormatGroup, BundleGroup, fmtCurrency, fmtEcpm, fmtPct,
 } from './dataProcessor';
-import { DayOverDay, BundleChange, changeLabel } from './history';
+import { BundleChange, changeLabel, PublisherDayOverDay, PublisherChange } from './history';
 
 export interface ReportSummaries {
   topBundles: AggRow[];
@@ -39,6 +39,42 @@ function htmlTable(cols: ColSpec[], rows: string[][]): string {
 }
 
 const contrib = (spend: number, base: number) => fmtPct(base > 0 ? spend / base : 0);
+
+/** Bold a short leading "Label:" prefix for scannability (email). */
+const emphLabel = (s: string): string => {
+  const m = s.match(/^([A-Za-z][A-Za-z ()/&-]{1,38}?):\s+(.*)$/);
+  return m ? `<b>${esc(m[1])}:</b> ${esc(m[2])}` : esc(s);
+};
+
+/** Render the Insights narrative as spaced paragraphs / bulleted lists / section
+    subheadings — mirrors the in-app InsightsBody so email and page match. */
+function insightsHtml(text: string): string {
+  const lines = String(text || '').split('\n').map((l) => l.trim()).filter(Boolean);
+  const sectionTitles = /^(executive summary|key findings?|key takeaways?|recommendations?|summary|findings?|overview|next steps)\s*:?$/i;
+  const isHeading = (l: string) => sectionTitles.test(l) || (/^[A-Z0-9][A-Z0-9 ,&/()\-]{2,39}:?$/.test(l) && !/[a-z]/.test(l));
+  const bullet = (l: string) => l.match(/^(?:[•\-*]|\d+\.)\s+(.*)$/);
+  let html = '';
+  let inList = false;
+  const closeList = () => { if (inList) { html += '</ul>'; inList = false; } };
+  lines.forEach((line, i) => {
+    const b = bullet(line);
+    const core = b ? b[1] : line;   // a heading may arrive wrapped as a bullet ("• Executive Summary")
+    if (isHeading(core)) {
+      closeList();
+      html += `<p style="margin:${i === 0 ? '0' : '14px'} 0 6px;font-size:12px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;color:#1976d2">${esc(core.replace(/:$/, ''))}</p>`;
+      return;
+    }
+    if (b) {
+      if (!inList) { html += '<ul style="margin:6px 0;padding-left:20px">'; inList = true; }
+      html += `<li style="margin:4px 0;line-height:1.6">${emphLabel(b[1])}</li>`;
+      return;
+    }
+    closeList();
+    html += `<p style="margin:6px 0;line-height:1.6">${emphLabel(line)}</p>`;
+  });
+  closeList();
+  return `<div style="background:#f5f7fa;padding:14px 18px;border-left:4px solid #1976d2;border-radius:0 6px 6px 0;font-size:13px;color:#333">${html}</div>`;
+}
 
 function publisherHtml(rows: AggRow[], inAppSpend: number): string {
   return htmlTable(
@@ -83,7 +119,7 @@ function pivotHtml(groups: AdFormatGroup[]): string {
   for (const g of groups) {
     rows.push([`<b>${esc(g.adFormat)}</b>`, `<b>${fmtCurrency(g.spend)}</b>`, `<b>${fmtPct(g.share)}</b>`, `<b>${fmtEcpm(g.ecpm)}</b>`]);
     for (const s of g.sizes) {
-      rows.push([`&nbsp;&nbsp;&rarr; ${esc(s.adSize)}`, fmtCurrency(s.spend), fmtPct(s.shareOfFormat), fmtEcpm(s.ecpm)]);
+      rows.push([`&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#666">${esc(s.adSize)}</span>`, fmtCurrency(s.spend), fmtPct(s.shareOfFormat), fmtEcpm(s.ecpm)]);
     }
   }
   return htmlTable(
@@ -99,7 +135,7 @@ function bundlePublisherHtml(groups: BundleGroup[], inAppSpend: number): string 
   for (const g of groups) {
     rows.push([`<b>${esc(g.appName)}</b><br><span style="color:#777">${esc(g.bundle)}</span>`, '<b>—</b>', '<b>—</b>', `<b>${fmtCurrency(g.spend)}</b>`, `<b>${contrib(g.spend, inAppSpend)}</b>`, `<b>${fmtEcpm(g.ecpm)}</b>`]);
     for (const r of g.rows) {
-      rows.push([`&nbsp;&nbsp;&rarr; ${esc(r.publisher)}`, esc(r.formats.join(', ')), fmtPct(r.shareOfBundle), fmtCurrency(r.spend), '', fmtEcpm(r.ecpm)]);
+      rows.push([`&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#666">${esc(r.publisher)}</span>`, esc(r.formats.join(', ')), fmtPct(r.shareOfBundle), fmtCurrency(r.spend), '', fmtEcpm(r.ecpm)]);
     }
   }
   return htmlTable(
@@ -108,17 +144,24 @@ function bundlePublisherHtml(groups: BundleGroup[], inAppSpend: number): string 
   );
 }
 
-function dayOverDayHtml(dod: DayOverDay | null, todayDate: string): string {
+/** Coloured up/down/new label for a publisher's day-over-day spend change (email cell). */
+function pubChangeHtml(c: PublisherChange): string {
+  if (c.status === 'new') return '<span style="color:#1976d2;font-weight:bold">NEW</span>';
+  if (c.spendDeltaPct === null) return '&mdash;';
+  const pct = Math.abs(Math.round(c.spendDeltaPct * 100));
+  if (c.status === 'up') return `<span style="color:#188038;font-weight:bold">&uarr; ${pct}%</span>`;
+  if (c.status === 'down') return `<span style="color:#d93025;font-weight:bold">&darr; ${pct}%</span>`;
+  return '<span style="color:#777">flat</span>';
+}
+
+function dayOverDayHtml(dod: PublisherDayOverDay | null, todayDate: string, inAppSpend: number): string {
   if (!dod) return `<p><i>No prior day on record — this run (${esc(todayDate)}) is the baseline for future comparisons.</i></p>`;
-  const list = (items: { bundle: string; appName: string }[]) =>
-    items.length ? '<ul style="margin:4px 0 12px 18px">' + items.map((b) => `<li>${esc(b.appName)} <span style="color:#777">(${esc(b.bundle)})</span></li>`).join('') + '</ul>' : '<p style="margin:4px 0 12px">None.</p>';
-  const movers = dod.movers.length
-    ? '<ul style="margin:4px 0 12px 18px">' + dod.movers.map((m) => `<li>${esc(m.appName)} <span style="color:#777">(${esc(m.bundle)})</span>: #${m.from} &rarr; #${m.to} (${m.delta > 0 ? `up ${m.delta}` : `down ${Math.abs(m.delta)}`})</li>`).join('') + '</ul>'
-    : '<p style="margin:4px 0 12px">No moves of 3+ ranks.</p>';
-  return `<p>Top ${dod.topN} in-app bundles vs ${esc(dod.prevDate)}:</p>`
-    + `<p style="margin:0"><b>New to top ${dod.topN} (${dod.newEntrants.length})</b></p>${list(dod.newEntrants)}`
-    + `<p style="margin:0"><b>Dropped out (${dod.dropped.length})</b></p>${list(dod.dropped)}`
-    + `<p style="margin:0"><b>Biggest rank moves</b></p>${movers}`;
+  return `<p>Top ${dod.rows.length} publishers by DSP spend vs ${esc(dod.prevDate)} `
+    + `(<span style="color:#188038">&uarr;</span> up / <span style="color:#d93025">&darr;</span> down / NEW = not in top publishers previously):</p>`
+    + htmlTable(
+      [{ label: 'Publisher' }, { label: 'DSP Spend', align: 'right' }, { label: 'Contribution', align: 'right' }, { label: 'vs prev', align: 'right' }],
+      dod.rows.map((r) => [esc(r.publisher) || '(unknown)', fmtCurrency(r.spend), contrib(r.spend, inAppSpend), pubChangeHtml(r)]),
+    );
 }
 
 export function buildEmailHtml(
@@ -126,7 +169,7 @@ export function buildEmailHtml(
   summaryText: string,
   metrics: AnalysisMetrics,
   dateLabel: string,
-  dayOverDay: DayOverDay | null = null,
+  pubDayOverDay: PublisherDayOverDay | null = null,
   changeMap: Record<string, BundleChange> = {},
 ): string {
   const now = new Date().toISOString().slice(0, 16).replace('T', ' ');
@@ -144,7 +187,7 @@ export function buildEmailHtml(
     </p>
     <hr>
     <h3>Insights</h3>
-    <p style="background:#f5f5f5;padding:14px;border-left:4px solid #1976d2;font-size:13px;line-height:1.7;white-space:pre-line">${esc(summaryText).replace(/\n/g, '<br>')}</p>
+    ${insightsHtml(summaryText)}
 
     <h3>Top ${s.topPublishers.length} Publishers</h3>
     ${publisherHtml(s.topPublishers, ia)}
@@ -166,12 +209,14 @@ export function buildEmailHtml(
 
     <h3>By Ad Format &amp; Size</h3>
     ${pivotHtml(s.adFormatPivot)}
+    <p style="font-size:11px;color:#777;margin:4px 0 0">Format rows = % of total in-app DSP spend; indented size rows = % within that format.</p>
 
     <h3>By Bundle &amp; Publisher (top ${s.bundlePublisher.length})</h3>
     ${bundlePublisherHtml(s.bundlePublisher, ia)}
+    <p style="font-size:11px;color:#777;margin:4px 0 0">Contribution = the bundle's share of total in-app DSP spend (all bundles, not just the top ${s.bundlePublisher.length}); indented publisher rows show % of that bundle.</p>
 
-    <h3>Day-over-day changes</h3>
-    ${dayOverDayHtml(dayOverDay, dateLabel)}
+    <h3>Publisher day-over-day changes</h3>
+    ${dayOverDayHtml(pubDayOverDay, dateLabel, ia)}
 
     <br>
     <p style="color:#999;font-size:11px">Auto-generated by GCK Automation — Bundle Level Analysis</p>

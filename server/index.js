@@ -276,7 +276,8 @@ app.post('/api/llm', async (req, res) => {
 });
 
 // GET /api/slack/looker-latest?channel=<id>&match=<substr>
-// Finds the newest CSV file Looker posted to a Slack channel and returns its text.
+// Finds the newest CSV/TSV file Looker posted to a Slack channel and returns its text
+// (TSV preferred — the newer schedule uses it to avoid the CSV row cap).
 // Uses SLACK_BOT_TOKEN (server/.env) — needs files:read (private: groups:history) and
 // the bot must be a member of the channel. Token never reaches the browser.
 app.get('/api/slack/looker-latest', async (req, res) => {
@@ -296,12 +297,15 @@ app.get('/api/slack/looker-latest', async (req, res) => {
         const list = await listResp.json();
         if (!list.ok) return res.status(200).json({ ok: false, error: `Slack files.list: ${list.error}` });
 
-        const csvFiles = (list.files || []).filter((f) =>
-            (f.filetype === 'csv' || String(f.name || '').toLowerCase().endsWith('.csv'))
-            && (!match || String(f.name || '').toLowerCase().includes(match)));
-        if (!csvFiles.length) return res.status(200).json({ ok: false, error: 'No matching CSV file found in that channel' });
-        csvFiles.sort((a, b) => (b.created || 0) - (a.created || 0));
-        const file = csvFiles[0];
+        // Accept CSV and TSV. The newer Looker schedule delivers TSV (no CSV row cap),
+        // so prefer TSV when both are present, then fall back to the newest by time.
+        const isTsv = (f) => f.filetype === 'tsv' || /\.(tsv|tab)$/.test(String(f.name || '').toLowerCase());
+        const isCsv = (f) => f.filetype === 'csv' || String(f.name || '').toLowerCase().endsWith('.csv');
+        const dataFiles = (list.files || []).filter((f) =>
+            (isTsv(f) || isCsv(f)) && (!match || String(f.name || '').toLowerCase().includes(match)));
+        if (!dataFiles.length) return res.status(200).json({ ok: false, error: 'No matching CSV/TSV file found in that channel' });
+        dataFiles.sort((a, b) => (isTsv(b) ? 1 : 0) - (isTsv(a) ? 1 : 0) || (b.created || 0) - (a.created || 0));
+        const file = dataFiles[0];
 
         const dl = await fetch(file.url_private_download || file.url_private, {
             headers: { Authorization: `Bearer ${token}` },

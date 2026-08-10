@@ -2,16 +2,19 @@ import React, { useMemo, useState } from 'react';
 import {
   Upload, Send, Eye, EyeOff, X, Plus, RotateCcw, AlertTriangle,
   CheckCircle2, Loader2, ChevronDown, ChevronUp, Terminal, FileSpreadsheet, Share2, BarChart3,
-  MessageSquare, RefreshCw,
+  MessageSquare, RefreshCw, ArrowUp, ArrowDown,
 } from 'lucide-react';
-import { parseFile, parseCsvText, autoMap, CANONICAL_FIELDS, FIELD_LABELS, REQUIRED_FIELDS, CanonicalField, ParsedFile } from '@/services/top-bundle/fileParser';
+import { parseFile, parseCsvText, autoMap, FIELD_LABELS, REQUIRED_FIELDS, CanonicalField, ParsedFile } from '@/services/top-bundle/fileParser';
 import { fetchLatestFromSlack } from '@/services/top-bundle/slackFetch';
 import {
   standardizeMapped, topBundles, topPublishers, byDsp, byCountry, byRegion, byPod,
   adFormatPivot, bundlePublisherBreakdown, partnerList, computeMetrics, generateStructuredSummary, inApp,
   fmtCurrency, fmtEcpm, fmtPct,
 } from '@/services/top-bundle/dataProcessor';
-import { saveSnapshot, previousSnapshot, diffTopN, bundleChangeMap, changeLabel, DayOverDay, BundleChange } from '@/services/top-bundle/history';
+import {
+  saveSnapshot, previousSnapshot, diffTopN, bundleChangeMap, changeLabel, BundleChange,
+  savePublisherSnapshot, previousPublisherSnapshot, diffPublishers, PublisherDayOverDay, PublisherChange,
+} from '@/services/top-bundle/history';
 import {
   buildEmailHtml, buildEmailSubject, partnerCsv, ReportSummaries,
 } from '@/services/top-bundle/reportBuilder';
@@ -51,6 +54,75 @@ function normalizeDate(s: string): string {
   const m = String(s).trim().match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})/);
   return m ? `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}` : '';
 }
+
+/** Strip Markdown decoration (#, **, *, _, `) from the AI narrative — the Insights
+    box renders plain text, so raw Markdown symbols would just show up literally. */
+function stripMarkdown(s: string): string {
+  return s
+    .replace(/^\s{0,3}#{1,6}\s+/gm, '')       // ATX headings (# .. ######)
+    .replace(/\*\*([^*]+)\*\*/g, '$1')        // **bold**
+    .replace(/__([^_]+)__/g, '$1')            // __bold__
+    .replace(/\*([^*]+)\*/g, '$1')            // *italic*
+    .replace(/`([^`]+)`/g, '$1')              // `code`
+    .replace(/^\s{0,3}[-*]\s+/gm, '• ')       // list bullets -> •
+    .trim();
+}
+
+/** Coloured up/down/new arrow for a publisher's day-over-day spend change. */
+const ChangeIndicator: React.FC<{ c: PublisherChange }> = ({ c }) => {
+  if (c.status === 'new') return <span style={{ color: 'var(--primary)', fontWeight: 600 }}>NEW</span>;
+  if (c.spendDeltaPct === null) return <span style={{ color: 'var(--text-muted)' }}>—</span>;
+  const pct = Math.abs(Math.round(c.spendDeltaPct * 100));
+  if (c.status === 'up') return <span style={{ color: 'var(--success)', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '0.15rem', justifyContent: 'flex-end' }}><ArrowUp size={14} />{pct}%</span>;
+  if (c.status === 'down') return <span style={{ color: 'var(--error)', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '0.15rem', justifyContent: 'flex-end' }}><ArrowDown size={14} />{pct}%</span>;
+  return <span style={{ color: 'var(--text-muted)' }}>flat</span>;
+};
+
+// ── Insights rendering ──
+// The AI briefing labels its sections in Title Case ("Executive Summary"), the
+// deterministic summary has none, and some models shout in ALL CAPS — treat all
+// three as section headings.
+const SECTION_TITLES = /^(executive summary|key findings?|key takeaways?|recommendations?|summary|findings?|overview|next steps)\s*:?$/i;
+const isInsightHeading = (l: string) =>
+  SECTION_TITLES.test(l) || (/^[A-Z0-9][A-Z0-9 ,&/()\-]{2,39}:?$/.test(l) && !/[a-z]/.test(l));
+const insightBullet = (l: string) => l.match(/^(?:[•\-*]|\d+\.)\s+(.*)$/);
+
+/** Bold a short leading "Label:" prefix (e.g. "By region: …") for scannability. */
+const emphasizeLabel = (s: string): React.ReactNode => {
+  const m = s.match(/^([A-Za-z][A-Za-z ()/&-]{1,38}?):\s+(.*)$/);
+  return m ? <><strong>{m[1]}:</strong> {m[2]}</> : s;
+};
+
+/** Render the Insights narrative professionally: ALL-CAPS lines become section
+    subheadings, "• / - / 1." lines become hanging bullets, and "Label:" prefixes
+    are emphasised. Handles both the AI briefing and the deterministic summary. */
+const InsightsBody: React.FC<{ text: string }> = ({ text }) => {
+  const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+  return (
+    <div style={{ fontSize: '0.875rem', color: 'var(--text-primary)' }}>
+      {lines.map((line, i) => {
+        const b = insightBullet(line);
+        const core = b ? b[1] : line;   // a heading may arrive wrapped as a bullet ("• Executive Summary")
+        if (isInsightHeading(core)) {
+          return (
+            <p key={i} style={{ fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--primary)', margin: i === 0 ? '0 0 0.4rem' : '1rem 0 0.4rem' }}>
+              {core.replace(/:$/, '')}
+            </p>
+          );
+        }
+        if (b) {
+          return (
+            <div key={i} style={{ display: 'flex', gap: '0.5rem', margin: '0.3rem 0', lineHeight: 1.6, alignItems: 'baseline' }}>
+              <span style={{ color: 'var(--primary)', flexShrink: 0 }}>•</span>
+              <span>{emphasizeLabel(b[1])}</span>
+            </div>
+          );
+        }
+        return <p key={i} style={{ margin: '0.4rem 0', lineHeight: 1.65 }}>{emphasizeLabel(line)}</p>;
+      })}
+    </div>
+  );
+};
 
 /** Masked input with show/hide (LLM API key). */
 const SecretInput: React.FC<{ label: string; value: string; onChange: (v: string) => void; placeholder?: string }> = ({ label, value, onChange, placeholder }) => {
@@ -162,9 +234,8 @@ export const TopBundleAnalysis: React.FC = () => {
   const [fileName, setFileName] = useState('');
   const [headers, setHeaders] = useState<string[]>([]);
   const [parsedRows, setParsedRows] = useState<Record<string, unknown>[]>([]);
+  // Column mapping is auto-detected from the fixed Looker export layout (no manual UI).
   const [mapping, setMapping] = useState<Record<CanonicalField, string | undefined>>({} as Record<CanonicalField, string | undefined>);
-  const setMapField = (field: CanonicalField, header: string) =>
-    setMapping((prev) => ({ ...prev, [field]: header || undefined }));
 
   // ── Slack auto-fetch (channel + token configured on the backend in server/.env) ──
   const [slackFetching, setSlackFetching] = useState(false);
@@ -208,8 +279,8 @@ export const TopBundleAnalysis: React.FC = () => {
   }), [rows]);
   const partner = useMemo(() => partnerList(rows), [rows]);
   const metrics = useMemo(() => computeMetrics(rows), [rows]);
-  const [dayOverDay, setDayOverDay] = useState<DayOverDay | null>(null);
   const [changeMap, setChangeMap] = useState<Record<string, BundleChange>>({});
+  const [pubDayOverDay, setPubDayOverDay] = useState<PublisherDayOverDay | null>(null);
 
   const missingRequired = REQUIRED_FIELDS.filter((f) => !mapping[f]);
   const needsBundleOrDomain = !mapping.bundle && !mapping.domain;
@@ -242,7 +313,7 @@ export const TopBundleAnalysis: React.FC = () => {
     try {
       // Channel + match come from server/.env (dev); token from server too.
       const { filename, text } = await fetchLatestFromSlack('', '', '');
-      applyParsed(parseCsvText(text), `Slack: ${filename}`);
+      applyParsed(parseCsvText(text, filename), `Slack: ${filename}`);
     } catch (err) {
       setError(`Slack fetch failed: ${(err as Error).message}`);
       addLog('error', `Slack fetch failed: ${(err as Error).message}`);
@@ -277,11 +348,22 @@ export const TopBundleAnalysis: React.FC = () => {
     const ranked = topBundles(std, 200);
     const prev = previousSnapshot(reportDate);
     const dod = prev ? diffTopN(ranked, prev, 50) : null;
-    setDayOverDay(dod);
     setChangeMap(bundleChangeMap(ranked, prev, 50));
     saveSnapshot(reportDate, ranked);
     if (dod) addLog('info', `Day-over-day vs ${dod.prevDate}: ${dod.newEntrants.length} new, ${dod.dropped.length} dropped, ${dod.movers.length} big movers in top 50.`);
     else addLog('info', 'Day-over-day: no prior day on record — baseline saved.');
+
+    // Publisher-level day-over-day (shown in the results — easier to read than bundles).
+    const rankedPubs = topPublishers(std, 100);
+    const prevPubs = previousPublisherSnapshot(reportDate);
+    const pubDod = diffPublishers(rankedPubs, prevPubs, 20);
+    setPubDayOverDay(pubDod);
+    savePublisherSnapshot(reportDate, rankedPubs);
+    if (pubDod) {
+      const ups = pubDod.rows.filter((r) => r.status === 'up').length;
+      const downs = pubDod.rows.filter((r) => r.status === 'down').length;
+      addLog('info', `Publisher day-over-day vs ${pubDod.prevDate}: ${ups} up, ${downs} down in top ${pubDod.topN}.`);
+    }
 
     setRunState('done');
 
@@ -296,7 +378,7 @@ export const TopBundleAnalysis: React.FC = () => {
       addLog('info', `Generating AI narrative via PubMatic Brain (${llmConfig.environment}, ${llmConfig.model})...`);
       try {
         const narrative = await generateNarrative(localSummaries, localMetrics, reportDate, llmConfig, dod);
-        if (narrative.trim()) { setSummaryText(narrative.trim()); addLog('info', 'AI narrative generated'); }
+        if (narrative.trim()) { setSummaryText(stripMarkdown(narrative)); addLog('info', 'AI narrative generated'); }
         else addLog('warn', 'AI returned an empty narrative — keeping the structured summary.');
       } catch (e) {
         addLog('warn', `AI narrative unavailable (${(e as Error).message.slice(0, 150)}) — keeping the structured summary.`);
@@ -316,7 +398,7 @@ export const TopBundleAnalysis: React.FC = () => {
   };
   const handleSendEmail = async () => {
     setSending(true); setEmailStatus(''); setEmailOk(null);
-    const html = buildEmailHtml(summaries, summaryText, metrics, reportDate, dayOverDay, changeMap);
+    const html = buildEmailHtml(summaries, summaryText, metrics, reportDate, pubDayOverDay, changeMap);
     const res = await sendEmail({
       subject: buildEmailSubject(reportDate), html,
       // Attachment = the clean, partner-shareable list (no spend), same as the XLSX export.
@@ -343,7 +425,7 @@ export const TopBundleAnalysis: React.FC = () => {
 
       {/* ── 1. import data ── */}
       <div className="glass-card animated-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-        <SectionHead n={1} title="Import data">
+        <SectionHead title="Import data">
           Load the daily Looker export — upload the file directly, or auto-fetch the latest one posted to Slack.
         </SectionHead>
 
@@ -353,10 +435,10 @@ export const TopBundleAnalysis: React.FC = () => {
             <span className="import-tile-icon"><FileSpreadsheet size={18} /></span>
             <h3>Upload Looker export</h3>
             <p className="import-tile-desc">
-              CSV or Excel with per-row Spend + Paid Impressions and the dimensions Bundle, Platform, Ad Format, Publisher, Domain.
+              CSV, TSV or Excel with per-row Spend + Paid Impressions and the dimensions Bundle, Platform, Ad Format, Publisher, Domain.
             </p>
             <label className="btn btn-primary" style={{ alignSelf: 'flex-start', cursor: 'pointer' }}>
-              <Upload size={16} /> Choose CSV / Excel
+              <Upload size={16} /> Choose CSV / TSV / Excel
               <input type="file" accept=".csv,.tsv,.xlsx,.xls,.xlsm" style={{ display: 'none' }}
                 onChange={(e) => { if (e.target.files?.[0]) { handleFile(e.target.files[0]); e.target.value = ''; } }} />
             </label>
@@ -367,7 +449,7 @@ export const TopBundleAnalysis: React.FC = () => {
             <span className="import-tile-icon"><MessageSquare size={18} /></span>
             <h3>Auto-fetch from Slack</h3>
             <p className="import-tile-desc">
-              Grabs the newest CSV Looker posted to the configured channel (<code>LOOKER_SLACK_CHANNEL</code> in <code>server/.env</code>). The bot needs <code>files:read</code> and must be in the channel.
+              Grabs the newest CSV/TSV Looker posted to the configured channel (<code>LOOKER_SLACK_CHANNEL</code> in <code>server/.env</code>), preferring TSV. The bot needs <code>files:read</code> and must be in the channel.
             </p>
             <button className="btn btn-secondary" style={{ alignSelf: 'flex-start' }}
               onClick={handleFetchSlack} disabled={slackFetching}>
@@ -378,50 +460,26 @@ export const TopBundleAnalysis: React.FC = () => {
         </div>
 
         {fileName && (
-          <div className="source-bar">
-            <CheckCircle2 size={16} style={{ color: 'var(--success)', flexShrink: 0 }} />
-            <span><b>{fileName}</b> — {parsedRows.length.toLocaleString()} rows loaded</span>
-          </div>
+          <>
+            <div className="source-bar">
+              <CheckCircle2 size={16} style={{ color: 'var(--success)', flexShrink: 0 }} />
+              <span><b>{fileName}</b> — {parsedRows.length.toLocaleString()} rows loaded</span>
+            </div>
+            {(missingRequired.length > 0 || needsBundleOrDomain) ? (
+              <p style={{ fontSize: '0.8125rem', color: 'var(--error)', display: 'flex', alignItems: 'center', gap: '0.4rem', margin: 0 }}>
+                <AlertTriangle size={15} /> This file is missing expected columns: {[...missingRequired.map((f) => FIELD_LABELS[f]), needsBundleOrDomain ? 'Bundle or Domain' : ''].filter(Boolean).join(', ')}. Check that it&apos;s the standard Looker export.
+              </p>
+            ) : (
+              <div>
+                <button className="btn btn-primary" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }} onClick={handleAnalyze} disabled={!mappingValid || isAnalyzing}>
+                  {isAnalyzing ? <Loader2 size={16} className="animate-spin" /> : <BarChart3 size={16} />}
+                  {isAnalyzing ? 'Analyzing...' : 'Analyze'}
+                </button>
+              </div>
+            )}
+          </>
         )}
       </div>
-
-      {/* ── 2. column mapping ── */}
-      {headers.length > 0 && (
-        <div className="glass-card animated-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          <SectionHead n={2} title="Map columns">
-            Auto-detected from your file — correct anything that&apos;s wrong. <b>Required:</b> Platform, Spend (DSP Spend), and Bundle or Domain. Impressions is optional (eCPM is used to derive it when absent); PMR and Revenue enrich the publisher view.
-          </SectionHead>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '0.75rem' }}>
-            {CANONICAL_FIELDS.map((field) => {
-              const required = REQUIRED_FIELDS.includes(field);
-              const missing = (required && !mapping[field]) || (field === 'bundle' && needsBundleOrDomain);
-              return (
-                <div className="form-group" key={field} style={{ marginBottom: 0 }}>
-                  <label className="form-label">
-                    {FIELD_LABELS[field]} {required && <span style={{ color: 'var(--error)' }}>*</span>}
-                  </label>
-                  <select className="input-text" value={mapping[field] ?? ''} onChange={(e) => setMapField(field, e.target.value)}
-                    style={missing ? { borderColor: 'var(--error)' } : undefined}>
-                    <option value="">— none —</option>
-                    {headers.map((h) => <option key={h} value={h}>{h}</option>)}
-                  </select>
-                </div>
-              );
-            })}
-          </div>
-          {(missingRequired.length > 0 || needsBundleOrDomain) && (
-            <p style={{ fontSize: '0.8125rem', color: 'var(--error)' }}>
-              Still needed: {[...missingRequired.map((f) => FIELD_LABELS[f]), needsBundleOrDomain ? 'Bundle or Domain' : ''].filter(Boolean).join(', ')}
-            </p>
-          )}
-          <div>
-            <button className="btn btn-primary" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }} onClick={handleAnalyze} disabled={!mappingValid || isAnalyzing}>
-              {isAnalyzing ? <Loader2 size={16} className="animate-spin" /> : <BarChart3 size={16} />}
-              {isAnalyzing ? 'Analyzing...' : 'Analyze'}
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* ── recipients (config, not a pipeline step) ── */}
       <div className="glass-card animated-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -492,9 +550,9 @@ export const TopBundleAnalysis: React.FC = () => {
               ))}
             </div>
 
-            <div style={{ background: 'var(--bg-subtle, #f5f5f5)', borderLeft: '4px solid var(--primary)', padding: '1rem', borderRadius: '0 0.5rem 0.5rem 0' }}>
-              <p style={{ fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>Insights</p>
-              <p style={{ fontSize: '0.875rem', whiteSpace: 'pre-line', lineHeight: 1.7 }}>{summaryText}</p>
+            <div style={{ background: 'var(--bg-subtle, #f5f5f5)', borderLeft: '4px solid var(--primary)', padding: '1rem 1.25rem', borderRadius: '0 0.5rem 0.5rem 0' }}>
+              <p style={{ fontSize: '0.75rem', fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '0.75rem' }}>Insights</p>
+              <InsightsBody text={summaryText} />
             </div>
 
             <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -552,18 +610,36 @@ export const TopBundleAnalysis: React.FC = () => {
             </div>
           </div>
 
-          {/* Day-over-day */}
-          <div className="glass-card animated-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-            <h2 style={{ fontSize: '1.05rem', fontWeight: 600 }}>Day-over-day changes (top 50 in-app bundles)</h2>
-            {!dayOverDay ? (
+          {/* Day-over-day — by publisher (a bundle alone doesn't tell you the publisher) */}
+          <div className="glass-card animated-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            <h2 style={{ fontSize: '1.05rem', fontWeight: 600 }}>Publisher day-over-day changes{pubDayOverDay ? ` (top ${pubDayOverDay.rows.length})` : ''}</h2>
+            {!pubDayOverDay ? (
               <p style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>No prior day on record — this run is the baseline for future comparisons.</p>
             ) : (
-              <div style={{ fontSize: '0.8125rem', lineHeight: 1.6 }}>
-                <p style={{ margin: '0 0 6px' }}>vs <b>{dayOverDay.prevDate}</b></p>
-                <p style={{ margin: '4px 0' }}><b>New to top 50 ({dayOverDay.newEntrants.length}):</b> {dayOverDay.newEntrants.map((b) => b.appName).join(', ') || 'none'}</p>
-                <p style={{ margin: '4px 0' }}><b>Dropped out ({dayOverDay.dropped.length}):</b> {dayOverDay.dropped.map((b) => b.appName).join(', ') || 'none'}</p>
-                <p style={{ margin: '4px 0' }}><b>Biggest moves:</b> {dayOverDay.movers.map((m) => `${m.appName} #${m.from}→#${m.to}`).join(', ') || 'none'}</p>
-              </div>
+              <>
+                <p style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', margin: 0 }}>DSP spend vs <b>{pubDayOverDay.prevDate}</b>. <span style={{ color: 'var(--success)' }}>↑</span> up / <span style={{ color: 'var(--error)' }}>↓</span> down / NEW = not in top publishers previously.</p>
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', fontSize: '0.8125rem', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr style={{ background: 'var(--primary)', color: 'white', textAlign: 'left' }}>
+                        {['Publisher', 'DSP Spend', 'Contribution', 'vs prev'].map((h, i) => (
+                          <th key={h} style={{ padding: '0.5rem 0.75rem', whiteSpace: 'nowrap', textAlign: i === 0 ? 'left' : 'right' }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pubDayOverDay.rows.map((r, i) => (
+                        <tr key={r.publisher || i} style={{ background: i % 2 ? '#f8fafc' : 'white', borderBottom: '1px solid #e5e7eb' }}>
+                          <td style={{ padding: '0.5rem 0.75rem' }}>{r.publisher || '(unknown)'}</td>
+                          <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtCurrency(r.spend)}</td>
+                          <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtPct(metrics.inAppSpend > 0 ? r.spend / metrics.inAppSpend : 0)}</td>
+                          <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right' }}><ChangeIndicator c={r} /></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
             )}
           </div>
 

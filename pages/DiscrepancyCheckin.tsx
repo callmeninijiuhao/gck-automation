@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import * as XLSX from 'xlsx';
 import {
   Play, Upload, Download, Send, Eye, EyeOff, X, Plus, RotateCcw,
-  AlertTriangle, CheckCircle2, Loader2, ChevronDown, ChevronUp, Terminal, Settings,
+  AlertTriangle, CheckCircle2, Loader2, ChevronDown, ChevronUp, Terminal, Settings, Sparkles,
 } from 'lucide-react';
 import { DiscrepancyRow, DiscrepancyTokens, DISCREPANCY_CONFIG } from '@/services/discrepancy/types';
 import { fetchAllPublishers, diagnoseError } from '@/services/discrepancy/apiService';
@@ -15,6 +15,8 @@ import { buildEmailHtml, buildEmailSubject, buildSlackBlocks } from '@/services/
 import { sendEmail, sendSlack } from '@/services/discrepancy/backendService';
 import { isTauri, AppSendSettings, DEFAULT_SEND_SETTINGS, getSendConfig, SendConfigStatus } from '@/services/discrepancy/nativeBridge';
 import { DEFAULT_PUBLISHER_IDS, DEFAULT_EMAIL_RECIPIENTS } from '@/services/discrepancy/defaults';
+import { generateDataReview, AnomalyCandidate } from '@/services/discrepancy/llmReview';
+import { DEFAULT_LLM_CONFIG } from '@/services/llm/brainClient';
 
 const PUB_LIST_KEY = 'discrepancy_publisher_ids';
 const RECIPIENTS_KEY = 'discrepancy_email_recipients';
@@ -239,6 +241,14 @@ export const DiscrepancyCheckin: React.FC = () => {
   const [rows, setRows] = useState<DiscrepancyRow[]>([]);
   const [summaryText, setSummaryText] = useState('');
 
+  // ── AI data review (advisory; manual trigger) ──
+  type ReviewState = 'idle' | 'running' | 'done' | 'error';
+  const [reviewState, setReviewState] = useState<ReviewState>('idle');
+  const [reviewText, setReviewText] = useState('');
+  const [reviewCandidates, setReviewCandidates] = useState<AnomalyCandidate[]>([]);
+  const [reviewError, setReviewError] = useState('');
+  const resetReview = () => { setReviewState('idle'); setReviewText(''); setReviewCandidates([]); setReviewError(''); };
+
   // ── sending ──
   const [slackChannel, setSlackChannel] = useState('#gck-discrepancy-checkin');
   const [sendSettings, setSendSettingsState] = useState<AppSendSettings>(() => {
@@ -309,6 +319,7 @@ export const DiscrepancyCheckin: React.FC = () => {
     setSlackStatus('');
     setRows([]);
     setSummaryText('');
+    resetReview();
     setLogs([]);
     setLogExpanded(true);
     setRunState('fetching');
@@ -399,8 +410,29 @@ export const DiscrepancyCheckin: React.FC = () => {
     setEmailStatus('');
     setSlackStatus('');
 
+    // Lead the email with the AI review. If it hasn't been run yet, generate it now so
+    // colleagues always get the plain-language read; on failure we send without it.
+    let review = reviewState === 'done' ? reviewText : '';
+    if (!review) {
+      addLog('info', 'Generating AI review to lead the email...');
+      try {
+        const { text, candidates } = await generateDataReview({
+          rows, dspSummary, highlights, fetchErrors, reportDate, cfg: DEFAULT_LLM_CONFIG,
+        });
+        if (text) {
+          review = text;
+          setReviewText(text);
+          setReviewCandidates(candidates);
+          setReviewState('done');
+          addLog('info', `✓ AI review generated (${candidates.length} flags) — leading the email`);
+        }
+      } catch (e) {
+        addLog('warn', `AI review unavailable for email (${(e as Error).message.slice(0, 150)}) — sending without it`);
+      }
+    }
+
     // Email
-    const html = buildEmailHtml(rows, summaryText, reportDate, dspSummary, topSpenders, highlights);
+    const html = buildEmailHtml(rows, summaryText, reportDate, dspSummary, topSpenders, highlights, review);
     const emailRes = await sendEmail({
       subject: buildEmailSubject(reportDate, highlights.length),
       html,
@@ -435,6 +467,30 @@ export const DiscrepancyCheckin: React.FC = () => {
     }
 
     setSending(false);
+  };
+
+  /** Advisory AI review — runs AFTER the deterministic checks, never replaces them.
+      Reasons about plausibility/anomalies; failures don't affect the report. */
+  const handleAiReview = async () => {
+    setReviewState('running');
+    setReviewError('');
+    setReviewText('');
+    addLog('info', `Running AI data review (advisory) via PubMatic Brain (${DEFAULT_LLM_CONFIG.model})...`);
+    try {
+      const { text, candidates } = await generateDataReview({
+        rows, dspSummary, highlights, fetchErrors, reportDate, cfg: DEFAULT_LLM_CONFIG,
+      });
+      if (!text) throw new Error('AI returned an empty review.');
+      setReviewText(text);
+      setReviewCandidates(candidates);
+      setReviewState('done');
+      addLog('info', `✓ AI review complete — ${candidates.length} data-quality flag(s) surfaced for triage`);
+    } catch (e) {
+      const msg = (e as Error).message;
+      setReviewError(msg);
+      setReviewState('error');
+      addLog('warn', `AI review unavailable (${msg.slice(0, 150)}) — deterministic checks are unaffected`);
+    }
   };
 
   const isRunning = runState === 'fetching' || runState === 'analyzing';
@@ -680,10 +736,59 @@ export const DiscrepancyCheckin: React.FC = () => {
               </div>
               <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: 0 }}>
                 Sends the email (with CSV attachment) to the {recipients.length} recipients in section 3 and posts to Slack in one click.
+                The email leads with the AI Data Review — if you haven&apos;t run it yet, it&apos;s generated automatically before sending. Slack is unchanged.
               </p>
               {emailStatus && <p style={{ fontSize: '0.8125rem' }}>Email: {emailStatus}</p>}
               {slackStatus && <p style={{ fontSize: '0.8125rem' }}>Slack: {slackStatus}</p>}
             </div>
+          </div>
+
+          {/* AI Data Review (advisory) */}
+          <div className="glass-card animated-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
+              <h2 style={{ fontSize: '1.05rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <Sparkles size={18} /> AI Data Review
+                <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'white', background: 'var(--text-muted)', borderRadius: '999px', padding: '0.1rem 0.5rem' }}>
+                  Advisory
+                </span>
+              </h2>
+              <button
+                className="btn btn-secondary"
+                style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', whiteSpace: 'nowrap' }}
+                onClick={handleAiReview}
+                disabled={reviewState === 'running'}
+              >
+                {reviewState === 'running' ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
+                {reviewState === 'running' ? 'Reviewing...' : reviewState === 'done' || reviewState === 'error' ? 'Re-run AI Review' : 'Run AI Review'}
+              </button>
+            </div>
+            <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: 0 }}>
+              A second pair of eyes — not a source of truth. Numeric accuracy is already verified deterministically (aggregation, dedup, consistency checks). This asks an AI analyst to judge <b>plausibility</b> and surface data-quality anomalies the fixed ±{(DISCREPANCY_CONFIG.highlightThreshold * 100).toFixed(0)}% threshold can miss. It never recomputes the numbers.
+            </p>
+            {reviewState === 'idle' && (
+              <p style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', margin: 0 }}>
+                Click <b>Run AI Review</b> to have the model triage this run.
+              </p>
+            )}
+            {reviewState === 'error' && (
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', fontSize: '0.8125rem', color: 'var(--warning)' }}>
+                <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: '0.1rem' }} />
+                <span>AI review unavailable: {reviewError}. The deterministic report above is unaffected.</span>
+              </div>
+            )}
+            {reviewState === 'done' && (
+              <>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                  {reviewCandidates.length} data-quality flag(s) detected deterministically and handed to the model for triage.
+                </div>
+                <div style={{ background: 'var(--bg-subtle, #f5f5f5)', borderLeft: '4px solid var(--secondary, #7c3aed)', padding: '1rem', borderRadius: '0 0.5rem 0.5rem 0' }}>
+                  <p style={{ fontSize: '0.875rem', whiteSpace: 'pre-line', lineHeight: 1.7, margin: 0 }}>{reviewText}</p>
+                </div>
+                <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', margin: 0 }}>
+                  Generated by {DEFAULT_LLM_CONFIG.model} (PubMatic Brain, {DEFAULT_LLM_CONFIG.environment}). Advisory only — verify before acting.
+                </p>
+              </>
+            )}
           </div>
 
           {/* Section 1 */}
