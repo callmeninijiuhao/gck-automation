@@ -288,7 +288,16 @@ app.get('/api/slack/looker-latest', async (req, res) => {
     // Channel/match come from the request, falling back to server/.env defaults.
     const channel = String(req.query.channel || process.env.LOOKER_SLACK_CHANNEL || '').trim();
     const match = String(req.query.match || process.env.LOOKER_SLACK_MATCH || '').trim().toLowerCase();
+    const date = String(req.query.date || '').trim();     // optional: an EXACT day's file (date-in-filename)
+    const before = String(req.query.before || '').trim(); // optional: the newest file dated strictly BEFORE this day
     if (!channel) return res.status(400).json({ ok: false, error: 'No channel — set LOOKER_SLACK_CHANNEL in server/.env or pass ?channel=' });
+    // Looker names its exports by date; the separator varies, so match several forms.
+    const dateVariants = date && /^\d{4}-\d{2}-\d{2}$/.test(date)
+        ? (() => { const [y, mo, da] = date.split('-'); return [`${y}-${mo}-${da}`, `${y}_${mo}_${da}`, `${y}${mo}${da}`, `${y}.${mo}.${da}`, `${y}/${mo}/${da}`].map((v) => v.toLowerCase()); })()
+        : [];
+    const nameHasDate = (name) => !dateVariants.length || dateVariants.some((v) => String(name || '').toLowerCase().includes(v));
+    // Pull the YYYY-MM-DD date out of a filename like "bundle_performance_20260810.tsv".
+    const fileDate = (name) => { const m = String(name || '').match(/(\d{4})[-_.]?(\d{2})[-_.]?(\d{2})/); return m ? `${m[1]}-${m[2]}-${m[3]}` : ''; };
 
     try {
         const listResp = await fetch(`https://slack.com/api/files.list?channel=${encodeURIComponent(channel)}&count=100`, {
@@ -297,15 +306,23 @@ app.get('/api/slack/looker-latest', async (req, res) => {
         const list = await listResp.json();
         if (!list.ok) return res.status(200).json({ ok: false, error: `Slack files.list: ${list.error}` });
 
-        // Accept CSV and TSV. The newer Looker schedule delivers TSV (no CSV row cap),
-        // so prefer TSV when both are present, then fall back to the newest by time.
+        // TSV only. Looker posts the dated TSV (bundle_performance_YYYYMMDD.tsv); the
+        // same-name CSV (no date) is ignored on purpose.
         const isTsv = (f) => f.filetype === 'tsv' || /\.(tsv|tab)$/.test(String(f.name || '').toLowerCase());
-        const isCsv = (f) => f.filetype === 'csv' || String(f.name || '').toLowerCase().endsWith('.csv');
-        const dataFiles = (list.files || []).filter((f) =>
-            (isTsv(f) || isCsv(f)) && (!match || String(f.name || '').toLowerCase().includes(match)));
-        if (!dataFiles.length) return res.status(200).json({ ok: false, error: 'No matching CSV/TSV file found in that channel' });
-        dataFiles.sort((a, b) => (isTsv(b) ? 1 : 0) - (isTsv(a) ? 1 : 0) || (b.created || 0) - (a.created || 0));
-        const file = dataFiles[0];
+        let dataFiles = (list.files || []).filter((f) =>
+            isTsv(f) && (!match || String(f.name || '').toLowerCase().includes(match)) && nameHasDate(f.name));
+        let file;
+        if (before && /^\d{4}-\d{2}-\d{2}$/.test(before)) {
+            // The most recent available day strictly before `before` (skips weekends/holidays/gaps).
+            const dated = dataFiles.map((f) => ({ f, d: fileDate(f.name) })).filter((x) => x.d && x.d < before);
+            dated.sort((a, b) => (a.d < b.d ? 1 : a.d > b.d ? -1 : (b.f.created || 0) - (a.f.created || 0)));
+            if (!dated.length) return res.status(200).json({ ok: false, error: `No TSV file dated before ${before} in that channel` });
+            file = dated[0].f;
+        } else {
+            if (!dataFiles.length) return res.status(200).json({ ok: false, error: date ? `No TSV file found for date ${date} in that channel` : 'No matching TSV file found in that channel' });
+            dataFiles.sort((a, b) => (b.created || 0) - (a.created || 0));   // newest first
+            file = dataFiles[0];
+        }
 
         const dl = await fetch(file.url_private_download || file.url_private, {
             headers: { Authorization: `Bearer ${token}` },

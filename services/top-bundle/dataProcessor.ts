@@ -9,6 +9,7 @@ import {
   AggRow, BundleRow, Environment, NA_TOKENS, PLATFORM_BUCKETS, PartnerRow,
   TOP_BUNDLE_CONFIG,
 } from './types';
+import type { DoDContext, DimDayOverDay, PublisherDayOverDay } from './history';
 
 /** field name → source column header (from the upload mapping UI). */
 export type FieldMapping = Record<string, string | undefined>;
@@ -32,14 +33,16 @@ const isNa = (v: unknown): boolean =>
 
 const cleanStr = (v: unknown): string | undefined => (isNa(v) ? undefined : String(v).trim());
 
-/** Parse Looker-style numbers: "$32.06 K" → 32060, "$0.9158" → 0.9158, "(1,234)" → -1234. */
+/** Parse Looker-style numbers: "$32.06 K" → 32060, "$0.9158" → 0.9158, "(1,234)" → -1234,
+    and scientific notation "7.5E-5" → 0.000075 (Looker exports tiny sub-cent values this way). */
 const toNum = (v: unknown): number => {
   if (v === null || v === undefined) return 0;
   let s = String(v).trim();
   if (!s) return 0;
   const neg = /^\(.*\)$/.test(s);
   s = s.replace(/[()$,\s]/g, '');
-  const m = s.match(/^-?\d*\.?\d+/);
+  // Capture an optional exponent so "7.5E-5" isn't truncated to 7.5.
+  const m = s.match(/^-?\d*\.?\d+(?:[eE][+-]?\d+)?/);
   if (!m) return 0;
   let n = parseFloat(m[0]);
   if (!Number.isFinite(n)) return 0;
@@ -173,47 +176,92 @@ export function bundleByPublisher(rows: BundleRow[], limitToTop = true): AggRow[
 export const topPublishers = (rows: BundleRow[], n = 20) =>
   aggregate(inApp(rows), ['publisher']).slice(0, n);
 
-// ── Ad format → size pivot (in-app) ──
-export interface AdSizeRow { adSize: string; spend: number; ecpm: number; shareOfFormat: number; }
-export interface AdFormatGroup { adFormat: string; spend: number; ecpm: number; share: number; sizes: AdSizeRow[]; }
+/** Whether a POD label belongs to the GCK POD (matched loosely — the Looker POD
+    value may read "GCK", "GCK POD", "APAC-GCK", etc.). */
+export const isGckPod = (pod?: string): boolean => /gck/i.test(String(pod ?? ''));
 
-export function adFormatPivot(rows: BundleRow[]): AdFormatGroup[] {
+/** GCK POD top publishers by in-app spend (rows whose POD matches isGckPod). */
+export const gckPublishers = (rows: BundleRow[], n = 20) =>
+  aggregate(inApp(rows).filter((r) => isGckPod(r.pod)), ['publisher']).slice(0, n);
+
+/** GCK POD top bundles (keyed by app name for readability), for the GCK deep-dive. */
+export const gckBundles = (rows: BundleRow[], n = 30) =>
+  aggregate(inApp(rows).filter((r) => isGckPod(r.pod)), ['appName']).slice(0, n);
+
+// ── Top DSPs, each with their top bundles (Top 10 DSP → Top 5 bundles) ──
+export interface DspBundleRow { bundle: string; appName: string; platform: string; spend: number; pmr: number; ecpm: number; spendShareOfDsp: number; pmrShareOfDsp: number; }
+export interface DspGroup { dsp: string; spend: number; pmr: number; ecpm: number; spendShare: number; pmrShare: number; rows: DspBundleRow[]; }
+
+export function dspWithBundles(rows: BundleRow[], nDsp = 10, nBundle = 5): DspGroup[] {
   const ia = inApp(rows);
-  const total = sumSpend(ia);
+  const totalSpend = sumSpend(ia);
+  const totalPmr = sumPmr(ia);
+  return aggregate(ia, ['dsp']).slice(0, nDsp).map((d) => {
+    const sub = ia.filter((r) => (r.dsp ?? '') === (d.dsp ?? ''));
+    const rws = aggregate(sub, ['bundle', 'appName', 'platform']).slice(0, nBundle).map((b) => ({
+      bundle: String(b.bundle ?? ''), appName: String(b.appName ?? ''), platform: String(b.platform ?? ''),
+      spend: b.spend, pmr: b.pmr, ecpm: b.ecpm,
+      spendShareOfDsp: d.spend > 0 ? b.spend / d.spend : 0,
+      pmrShareOfDsp: d.pmr > 0 ? b.pmr / d.pmr : 0,
+    }));
+    return {
+      dsp: String(d.dsp ?? '') || '(none)', spend: d.spend, pmr: d.pmr, ecpm: d.ecpm,
+      spendShare: totalSpend > 0 ? d.spend / totalSpend : 0, pmrShare: totalPmr > 0 ? d.pmr / totalPmr : 0, rows: rws,
+    };
+  });
+}
+
+// ── Ad format → size pivot (in-app) ──
+export interface AdSizeRow { adSize: string; spend: number; pmr: number; ecpm: number; spendShareOfFormat: number; pmrShareOfFormat: number; }
+export interface AdFormatGroup { adFormat: string; spend: number; pmr: number; ecpm: number; spendShare: number; pmrShare: number; sizes: AdSizeRow[]; }
+
+export function adFormatPivot(rows: BundleRow[], displayMaxSizes = 5): AdFormatGroup[] {
+  const ia = inApp(rows);
+  const totalSpend = sumSpend(ia);
+  const totalPmr = sumPmr(ia);
   return aggregate(ia, ['adFormat']).map((f) => {
     const fmt = String(f.adFormat ?? '') || '(none)';
-    const sizes = aggregate(ia.filter((r) => (r.adFormat ?? '') === (f.adFormat ?? '')), ['adSize'])
+    const allSizes = aggregate(ia.filter((r) => (r.adFormat ?? '') === (f.adFormat ?? '')), ['adSize'])
       .map((s) => ({
-        adSize: String(s.adSize ?? '') || '(none)', spend: s.spend, ecpm: s.ecpm,
-        shareOfFormat: f.spend > 0 ? s.spend / f.spend : 0,
+        adSize: String(s.adSize ?? '') || '(none)', spend: s.spend, pmr: s.pmr, ecpm: s.ecpm,
+        spendShareOfFormat: f.spend > 0 ? s.spend / f.spend : 0,
+        pmrShareOfFormat: f.pmr > 0 ? s.pmr / f.pmr : 0,
       }));
-    return { adFormat: fmt, spend: f.spend, ecpm: f.ecpm, share: total > 0 ? f.spend / total : 0, sizes };
+    // Display carries many sizes — cap to the top few (already sorted by spend desc).
+    const sizes = /display/i.test(fmt) ? allSizes.slice(0, displayMaxSizes) : allSizes;
+    return {
+      adFormat: fmt, spend: f.spend, pmr: f.pmr, ecpm: f.ecpm,
+      spendShare: totalSpend > 0 ? f.spend / totalSpend : 0, pmrShare: totalPmr > 0 ? f.pmr / totalPmr : 0, sizes,
+    };
   });
 }
 
 // ── Top bundles broken down by their top publishers (formats merged into a list) ──
-export interface BundlePubRow { publisher: string; formats: string[]; spend: number; ecpm: number; shareOfBundle: number; }
+export interface BundlePubRow { publisher: string; formats: string[]; spend: number; pmr: number; ecpm: number; spendShareOfBundle: number; pmrShareOfBundle: number; }
 export interface BundleGroup {
-  bundle: string; appName: string; platform: string; spend: number; ecpm: number; share: number;
+  bundle: string; appName: string; platform: string; spend: number; pmr: number; ecpm: number; spendShare: number; pmrShare: number;
   rows: BundlePubRow[];
 }
 
 export function bundlePublisherBreakdown(rows: BundleRow[], n = 20, topPub = 3): BundleGroup[] {
   const ia = inApp(rows);
-  const total = sumSpend(ia);
+  const totalSpend = sumSpend(ia);
+  const totalPmr = sumPmr(ia);
   return aggregate(ia, ['bundle', 'appName', 'platform']).slice(0, n).map((b) => {
     const sub = ia.filter((r) => (r.bundle ?? '') === (b.bundle ?? ''));
     const rws = aggregate(sub, ['publisher']).slice(0, topPub).map((p) => {
       const formats = [...new Set(sub.filter((r) => (r.publisher ?? '') === (p.publisher ?? '')).map((r) => r.adFormat).filter(Boolean))] as string[];
       return {
         publisher: String(p.publisher ?? '') || '(unknown)',
-        formats, spend: p.spend, ecpm: p.ecpm,
-        shareOfBundle: b.spend > 0 ? p.spend / b.spend : 0,
+        formats, spend: p.spend, pmr: p.pmr, ecpm: p.ecpm,
+        spendShareOfBundle: b.spend > 0 ? p.spend / b.spend : 0,
+        pmrShareOfBundle: b.pmr > 0 ? p.pmr / b.pmr : 0,
       };
     });
     return {
       bundle: String(b.bundle ?? ''), appName: String(b.appName ?? ''), platform: String(b.platform ?? ''),
-      spend: b.spend, ecpm: b.ecpm, share: total > 0 ? b.spend / total : 0, rows: rws,
+      spend: b.spend, pmr: b.pmr, ecpm: b.ecpm,
+      spendShare: totalSpend > 0 ? b.spend / totalSpend : 0, pmrShare: totalPmr > 0 ? b.pmr / totalPmr : 0, rows: rws,
     };
   });
 }
@@ -224,6 +272,9 @@ export const byDsp = (rows: BundleRow[], n = 20) =>
 
 export const byAdFormatSize = (rows: BundleRow[], n = 30) =>
   aggregate(inApp(rows), ['adFormat', 'adSize']).slice(0, n);
+
+export const byAdFormat = (rows: BundleRow[], n = 30) =>
+  aggregate(inApp(rows), ['adFormat']).slice(0, n);
 
 export const byCountry = (rows: BundleRow[], n = 30) =>
   aggregate(inApp(rows), ['country']).slice(0, n);
@@ -264,6 +315,7 @@ export interface AnalysisMetrics {
   ctvSpend: number;
   inAppShare: number;      // fraction
   totalPmr: number;        // PubMatic revenue (all rows)
+  inAppPmr: number;        // PubMatic revenue (in-app only) — base for PMR contribution %
   totalRevenue: number;    // publisher revenue (all rows)
   distinctBundles: number;
   distinctDomains: number;
@@ -273,6 +325,7 @@ export interface AnalysisMetrics {
 }
 
 const sumSpend = (rows: BundleRow[]) => rows.reduce((s, r) => s + r.spend, 0);
+const sumPmr = (rows: BundleRow[]) => rows.reduce((s, r) => s + r.pmr, 0);
 
 export function computeMetrics(rows: BundleRow[]): AnalysisMetrics {
   const tb = topBundles(rows, 1)[0];
@@ -287,7 +340,8 @@ export function computeMetrics(rows: BundleRow[]): AnalysisMetrics {
     webSpend: sumSpend(webMweb(rows)),
     ctvSpend,
     inAppShare: totalSpend > 0 ? inAppSpend / totalSpend : 0,
-    totalPmr: rows.reduce((s, r) => s + r.pmr, 0),
+    totalPmr: sumPmr(rows),
+    inAppPmr: sumPmr(inApp(rows)),
     totalRevenue: rows.reduce((s, r) => s + r.revenue, 0),
     distinctBundles: new Set(inApp(rows).map((r) => r.bundle)).size,
     distinctDomains: new Set(webMweb(rows).map((r) => r.domain)).size,
@@ -297,30 +351,144 @@ export function computeMetrics(rows: BundleRow[]): AnalysisMetrics {
   };
 }
 
+// ── deterministic executive-summary helpers (PMR-based DoD attribution) ──
+const roundPct = (frac: number) => Math.round(frac * 100);
+/** Signed % (e.g. "+12%", "-8%"). '' when null. Kept signed so renderers can colour it. */
+const signed = (frac: number | null): string => (frac === null ? '' : `${frac >= 0 ? '+' : ''}${roundPct(frac)}%`);
+
+/** Single most likely PMR driver for the opening line: top publisher gainer, else top POD/region gainer. */
+function leadDriver(dod?: DoDContext | null): string {
+  if (!dod) return '';
+  const pubUp = dod.publishers?.rows
+    .filter((r) => r.status === 'up' && r.pmrDeltaPct !== null)
+    .sort((a, b) => b.pmrDeltaPct! - a.pmrDeltaPct!)[0];
+  if (pubUp) return `${pubUp.publisher} (${signed(pubUp.pmrDeltaPct)})`;
+  const pickDim = (d: DimDayOverDay | null | undefined, tmpl: (n: string, s: string) => string): string => {
+    const up = d?.rows
+      .filter((r) => r.status === 'up' && r.pmrDeltaPct !== null)
+      .sort((a, b) => b.pmrDeltaPct! - a.pmrDeltaPct!)[0];
+    return up ? tmpl(up.name, signed(up.pmrDeltaPct)) : '';
+  };
+  return pickDim(dod.pod, (n, s) => `the ${n} POD (${s})`) || pickDim(dod.region, (n, s) => `${n} (${s})`);
+}
+
 /**
- * Deterministic structured summary (no LLM).
- *
- * ▶▶ LLM NARRATIVE SLOT ◀◀
- * To add an AI narrative later, generate the text from these same aggregated
- * tables (topBundles / topDomains / ctvSummary / computeMetrics) and pass it in
- * place of this string. Do NOT feed raw rows to the model — only summaries.
+ * Deterministic executive summary (no LLM) — the fallback when the AI narrative is
+ * unavailable. Grouped for scannability: an "Executive Summary" heading, a one-line
+ * tone intro, then short topic categories (Overall → By Region → By POD → By Publisher →
+ * GCK POD) each with a couple of concise "• " sub-bullets. PMR (PubMatic revenue) leads
+ * every data point, annotated with its signed day-over-day change so renderers can
+ * colour ▲/▼. Highlights only — the tables below carry the full detail. Neutral wording.
  */
-export function generateStructuredSummary(rows: BundleRow[], dateLabel: string): string {
+export function generateStructuredSummary(rows: BundleRow[], dateLabel: string, dod?: DoDContext | null): string {
   const m = computeMetrics(rows);
-  const share = (v: number) => fmtPct(m.inAppSpend > 0 ? v / m.inAppSpend : 0);
+  const pmrShare = (v: number) => fmtPct(m.inAppPmr > 0 ? v / m.inAppPmr : 0);
   const reg = byRegion(rows);
-  const pod = byPod(rows, 5);
-  const tb = topBundles(rows, 5);
   const tp = topPublishers(rows, 5);
-  const fmt = adFormatPivot(rows);
-  const L: string[] = [];
-  L.push(`High-level summary for ${dateLabel} (mobile in-app).`);
-  L.push(`In-app DSP spend ${fmtCurrency(m.inAppSpend)}; PubMatic revenue (PMR) ${fmtCurrency(m.totalPmr)}; publisher revenue ${fmtCurrency(m.totalRevenue)}.`);
-  if (reg.length) L.push(`By region: ${reg.map((r) => `${r.region} ${fmtCurrency(r.spend)} (${share(r.spend)}, eCPM ${fmtEcpm(r.ecpm)})`).join('; ')}.`);
-  if (pod.length) L.push(`Top PODs: ${pod.map((p) => `${p.pod} ${fmtCurrency(p.spend)} (${share(p.spend)})`).join('; ')}.`);
-  if (tb.length) L.push(`Top bundles: ${tb.map((b) => `${b.appName} ${fmtCurrency(b.spend)} (${share(b.spend)}, eCPM ${fmtEcpm(b.ecpm)})`).join('; ')}.`);
-  if (tp.length) L.push(`Top publishers: ${tp.map((p) => `${p.publisher} ${fmtCurrency(p.spend)} (${share(p.spend)})`).join('; ')}.`);
-  if (fmt.length) L.push(`Ad formats: ${fmt.map((f) => `${f.adFormat} ${fmtCurrency(f.spend)} (${fmtPct(f.share)})`).join('; ')}.`);
-  L.push(`${m.distinctBundles} distinct in-app bundles.`);
+  const gckPmr = sumPmr(inApp(rows).filter((r) => isGckPod(r.pod)));
+  const dimSign = (d: DimDayOverDay | null | undefined, name: string) => {
+    const r = d?.rows.find((x) => x.name === name);
+    return r?.pmrDeltaPct != null ? ` (${signed(r.pmrDeltaPct)})` : '';
+  };
+  const pubSign = (d: PublisherDayOverDay | null | undefined, pub: string) => {
+    const r = d?.rows.find((x) => x.publisher === pub);
+    return r?.pmrDeltaPct != null ? ` (${signed(r.pmrDeltaPct)})` : '';
+  };
+  // DSP-spend deltas (secondary but daily-watched metric) — shown alongside PMR.
+  const dimSpendSign = (d: DimDayOverDay | null | undefined, name: string) => {
+    const r = d?.rows.find((x) => x.name === name);
+    return r?.spendDeltaPct != null ? ` (${signed(r.spendDeltaPct)})` : '';
+  };
+  const overall = dod?.overall ?? null;
+  const L: string[] = ['Executive Summary'];
+
+  // One-line tone intro (paragraph, not a bullet).
+  if (overall && overall.pmrDeltaPct !== null) {
+    const p = roundPct(overall.pmrDeltaPct);
+    const tone = p >= 1
+      ? `Today is a good day — overall PMR grew +${p}% vs ${overall.prevDate}`
+      : p <= -1
+        ? `A steady day — overall PMR saw a ${p}% adjustment vs ${overall.prevDate}`
+        : `A stable day — overall PMR held roughly flat vs ${overall.prevDate}`;
+    const driver = leadDriver(dod);
+    const spDelta = overall.spendDeltaPct != null ? `; DSP spend ${signed(overall.spendDeltaPct)}` : '';
+    L.push(`${tone}${spDelta}${driver ? `, led mainly by ${driver}` : ''}.`);
+  } else {
+    L.push(`Baseline day for ${dateLabel} — first run on record; today sets the reference for future day-over-day comparisons.`);
+  }
+
+  // Overall — PMR (KPI) and DSP spend side by side, plus a take-rate / margin read.
+  L.push('Overall');
+  const kpiD = overall?.pmrDeltaPct != null ? ` (${signed(overall.pmrDeltaPct)} vs prev)` : '';
+  const spD = overall?.spendDeltaPct != null ? ` (${signed(overall.spendDeltaPct)} vs prev)` : '';
+  const take = m.inAppSpend > 0 ? fmtPct(m.inAppPmr / m.inAppSpend) : 'n/a';
+  const margin = (overall?.pmrDeltaPct != null && overall?.spendDeltaPct != null)
+    ? (overall.pmrDeltaPct - overall.spendDeltaPct > 0.01 ? ' — margin improving (PMR outpacing spend)'
+      : overall.spendDeltaPct - overall.pmrDeltaPct > 0.01 ? ' — margin compressing (spend outpacing PMR)' : '')
+    : '';
+  L.push(`• PMR ${fmtCurrency(m.inAppPmr)}${kpiD}; DSP spend ${fmtCurrency(m.inAppSpend)}${spD}; take rate ~${take}${margin}.`);
+  if (m.inAppPmr <= 0) L.push('• PMR is $0 in this export — check the PMR column is mapped so PMR metrics populate.');
+
+  // By Region — PMR + DSP spend
+  if (reg.length) {
+    L.push('By Region');
+    const regLine = (r: AggRow) => `• ${r.region}: PMR ${fmtCurrency(r.pmr)} (${pmrShare(r.pmr)})${dimSign(dod?.region, String(r.region ?? ''))}, DSP spend ${fmtCurrency(r.spend)}${dimSpendSign(dod?.region, String(r.region ?? ''))}.`;
+    L.push(regLine(reg[0]));
+    if (reg[1]) L.push(regLine(reg[1]));
+  }
+
+  // By POD (avoid repeating GCK when it is already the top POD) — PMR + DSP spend
+  const pods = byPod(rows, 5);
+  if (pods.length) {
+    L.push('By POD');
+    const topIsGck = isGckPod(String(pods[0].pod ?? ''));
+    const podLine = (label: string, r: AggRow, gck = false) =>
+      `• ${label}: PMR ${fmtCurrency(r.pmr)} (${pmrShare(r.pmr)})${dimSign(dod?.pod, gck ? 'GCK' : String(r.pod ?? ''))}, DSP spend ${fmtCurrency(r.spend)}${dimSpendSign(dod?.pod, gck ? 'GCK' : String(r.pod ?? ''))}.`;
+    L.push(podLine(`Top POD ${pods[0].pod}`, pods[0]));
+    if (topIsGck && pods[1]) {
+      L.push(podLine(`Next ${pods[1].pod}`, pods[1]));
+    } else if (!topIsGck) {
+      const gckRow = pods.find((p) => isGckPod(String(p.pod ?? '')));
+      if (gckRow) L.push(podLine('GCK POD', gckRow, true));
+    }
+  }
+
+  // By Publisher (overall market)
+  L.push('By Publisher');
+  if (tp.length) L.push(`• Top publisher ${tp[0].publisher}: PMR ${fmtCurrency(tp[0].pmr)} (${pmrShare(tp[0].pmr)})${pubSign(dod?.publishers, String(tp[0].publisher ?? ''))}.`);
+  const topShare = tp.length && m.inAppPmr > 0 ? tp.slice(0, 3).reduce((s, p) => s + p.pmr, 0) / m.inAppPmr : 0;
+  if (topShare) L.push(`• Top 3 publishers = ${fmtPct(topShare)} of PMR — ${topShare > 0.5 ? 'concentrated, worth monitoring' : 'reasonably diversified'}.`);
+
+  // GCK POD — the deep dive (our POD's publishers & bundles)
+  L.push('GCK POD');
+  const gckPubUp = gainers(dod?.gckPublishers?.rows, (r) => r.publisher);
+  const gckPubDown = decliners(dod?.gckPublishers?.rows, (r) => r.publisher);
+  if (gckPubUp || gckPubDown) {
+    L.push(`• Publishers${gckPubUp ? ` — growing: ${gckPubUp}` : ''}${gckPubDown ? `${gckPubUp ? ';' : ' —'} watch: ${gckPubDown}` : ''}.`);
+  }
+  const gckBunUp = gainers(dod?.gckBundles?.rows, (r) => r.name);
+  const gckBunDown = decliners(dod?.gckBundles?.rows, (r) => r.name);
+  if (gckBunUp || gckBunDown) {
+    L.push(`• Bundles${gckBunUp ? ` — growing: ${gckBunUp}` : ''}${gckBunDown ? `${gckBunUp ? ';' : ' —'} watch: ${gckBunDown}` : ''}.`);
+  }
+  if (!gckPubUp && !gckPubDown && !gckBunUp && !gckBunDown) {
+    L.push('• No prior day yet for GCK — baseline set; publisher/bundle movements will show here from the next run.');
+  }
+
   return L.join('\n');
+}
+
+/** Top 2 PMR gainers / decliners from a DoD rows list. `name` extracts the label. */
+type DeltaLike = { pmrDeltaPct: number | null; status: string };
+function gainers<T extends DeltaLike>(rows: T[] | undefined, name: (r: T) => string): string {
+  return (rows ?? [])
+    .filter((r) => r.pmrDeltaPct != null && r.status === 'up')
+    .sort((a, b) => b.pmrDeltaPct! - a.pmrDeltaPct!).slice(0, 2)
+    .map((r) => `${name(r)} ${signed(r.pmrDeltaPct)}`).join(', ');
+}
+function decliners<T extends DeltaLike>(rows: T[] | undefined, name: (r: T) => string): string {
+  return (rows ?? [])
+    .filter((r) => r.pmrDeltaPct != null && r.status === 'down')
+    .sort((a, b) => a.pmrDeltaPct! - b.pmrDeltaPct!).slice(0, 2)
+    .map((r) => `${name(r)} ${signed(r.pmrDeltaPct)}`).join(', ');
 }

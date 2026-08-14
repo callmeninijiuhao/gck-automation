@@ -1,22 +1,25 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import {
   Upload, Send, Eye, EyeOff, X, Plus, RotateCcw, AlertTriangle,
   CheckCircle2, Loader2, ChevronDown, ChevronUp, Terminal, FileSpreadsheet, Share2, BarChart3,
   MessageSquare, RefreshCw, ArrowUp, ArrowDown,
 } from 'lucide-react';
 import { parseFile, parseCsvText, autoMap, FIELD_LABELS, REQUIRED_FIELDS, CanonicalField, ParsedFile } from '@/services/top-bundle/fileParser';
-import { fetchLatestFromSlack } from '@/services/top-bundle/slackFetch';
+import { fetchLatestFromSlack, fetchPriorFromSlack } from '@/services/top-bundle/slackFetch';
 import {
-  standardizeMapped, topBundles, topPublishers, byDsp, byCountry, byRegion, byPod,
+  standardizeMapped, topBundles, topPublishers, byDsp, byCountry, byRegion, byPod, byAdFormat,
   adFormatPivot, bundlePublisherBreakdown, partnerList, computeMetrics, generateStructuredSummary, inApp,
+  gckPublishers, gckBundles, dspWithBundles, isGckPod,
   fmtCurrency, fmtEcpm, fmtPct,
 } from '@/services/top-bundle/dataProcessor';
 import {
-  saveSnapshot, previousSnapshot, diffTopN, bundleChangeMap, changeLabel, BundleChange,
-  savePublisherSnapshot, previousPublisherSnapshot, diffPublishers, PublisherDayOverDay, PublisherChange,
+  saveSnapshot, previousSnapshot, diffTopN, bundleChangeMap, BundleChange,
+  savePublisherSnapshot, previousPublisherSnapshot, diffPublishers, PublisherDayOverDay,
+  saveDimSnapshot, previousDimSnapshot, diffDim, dimChangeOf, DimDayOverDay,
+  saveDailyTotals, previousDailyTotals, overallDayOverDay, OverallDoD, DoDContext,
 } from '@/services/top-bundle/history';
 import {
-  buildEmailHtml, buildEmailSubject, partnerCsv, ReportSummaries,
+  buildEmailHtml, buildEmailSubject, partnerCsv, ReportSummaries, EmailDoD,
 } from '@/services/top-bundle/reportBuilder';
 import { TopBundleExcel } from '@/services/top-bundle/excelGenerator';
 import { generateNarrative, LlmConfig, DEFAULT_LLM_CONFIG } from '@/services/top-bundle/llmService';
@@ -55,6 +58,22 @@ function normalizeDate(s: string): string {
   return m ? `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}` : '';
 }
 
+/** Persist every per-day snapshot used for day-over-day (bundles, publishers, dims, totals).
+    Shared by today's run and the Slack previous-day backfill. */
+function saveDaySnapshots(date: string, std: BundleRow[]): void {
+  saveSnapshot(date, topBundles(std, 200));
+  savePublisherSnapshot(date, topPublishers(std, 100), 'all');
+  savePublisherSnapshot(date, gckPublishers(std, 100), 'gck');
+  saveDimSnapshot('region', date, byRegion(std), 'region');
+  saveDimSnapshot('pod', date, byPod(std, 30), 'pod');
+  saveDimSnapshot('dsp', date, byDsp(std, 30), 'dsp');
+  saveDimSnapshot('country', date, byCountry(std, 30), 'country');
+  saveDimSnapshot('adFormat', date, byAdFormat(std, 30), 'adFormat');
+  saveDimSnapshot('gckbundle', date, gckBundles(std, 50), 'appName');
+  const m = computeMetrics(std);
+  saveDailyTotals(date, { inAppSpend: m.inAppSpend, pmr: m.inAppPmr, revenue: m.totalRevenue });
+}
+
 /** Strip Markdown decoration (#, **, *, _, `) from the AI narrative — the Insights
     box renders plain text, so raw Markdown symbols would just show up literally. */
 function stripMarkdown(s: string): string {
@@ -68,30 +87,93 @@ function stripMarkdown(s: string): string {
     .trim();
 }
 
-/** Coloured up/down/new arrow for a publisher's day-over-day spend change. */
-const ChangeIndicator: React.FC<{ c: PublisherChange }> = ({ c }) => {
+/** Coloured PMR up/down/new arrow for a day-over-day change (publisher / country / dimension). */
+const ChangeIndicator: React.FC<{ c: { status: 'new' | 'up' | 'down' | 'flat'; pmrDeltaPct: number | null } | null | undefined }> = ({ c }) => {
+  if (!c) return <span style={{ color: 'var(--text-muted)' }}>—</span>;
   if (c.status === 'new') return <span style={{ color: 'var(--primary)', fontWeight: 600 }}>NEW</span>;
-  if (c.spendDeltaPct === null) return <span style={{ color: 'var(--text-muted)' }}>—</span>;
-  const pct = Math.abs(Math.round(c.spendDeltaPct * 100));
+  if (c.pmrDeltaPct === null) return <span style={{ color: 'var(--text-muted)' }}>—</span>;
+  const pct = Math.abs(Math.round(c.pmrDeltaPct * 100));
   if (c.status === 'up') return <span style={{ color: 'var(--success)', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '0.15rem', justifyContent: 'flex-end' }}><ArrowUp size={14} />{pct}%</span>;
   if (c.status === 'down') return <span style={{ color: 'var(--error)', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '0.15rem', justifyContent: 'flex-end' }}><ArrowDown size={14} />{pct}%</span>;
   return <span style={{ color: 'var(--text-muted)' }}>flat</span>;
+};
+
+// ── Day-over-day table (publisher / country): first col + DSP spend + PMR + PMR% + PMR arrow ──
+type DeltaCell = { status: 'new' | 'up' | 'down' | 'flat'; pmrDeltaPct: number | null };
+type DodRow = { name: string; spend: number; pmr: number; change: DeltaCell | null };
+
+const pubDodRows = (ranked: AggRow[], dod: PublisherDayOverDay | null): DodRow[] =>
+  dod ? dod.rows.map((r) => ({ name: r.publisher, spend: r.spend, pmr: r.pmr, change: r }))
+      : ranked.map((r) => ({ name: String(r.publisher ?? ''), spend: r.spend, pmr: r.pmr, change: null }));
+
+const dimDodRows = (ranked: AggRow[], dod: DimDayOverDay | null, key: keyof AggRow): DodRow[] =>
+  dod ? dod.rows.map((r) => ({ name: r.name, spend: r.spend, pmr: r.pmr, change: r }))
+      : ranked.map((r) => ({ name: String(r[key] ?? ''), spend: r.spend, pmr: r.pmr, change: null }));
+
+const DodTable: React.FC<{ firstCol: string; rows: DodRow[]; totalSpend: number; totalPmr: number }> = ({ firstCol, rows, totalSpend, totalPmr }) => (
+  <div style={{ overflowX: 'auto' }}>
+    <table style={{ width: '100%', fontSize: '0.8125rem', borderCollapse: 'collapse' }}>
+      <thead>
+        <tr style={{ background: 'var(--primary)', color: 'white', textAlign: 'left' }}>
+          {[firstCol, 'DSP Spend', 'DSP %', 'PMR', 'PMR %', 'vs prev'].map((h, i) => (
+            <th key={h} style={{ padding: '0.5rem 0.75rem', whiteSpace: 'nowrap', textAlign: i === 0 ? 'left' : 'right' }}>{h}</th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((r, i) => (
+          <tr key={r.name || i} style={{ background: i % 2 ? '#f8fafc' : 'white', borderBottom: '1px solid #e5e7eb' }}>
+            <td style={{ padding: '0.5rem 0.75rem' }}>{r.name || '(unknown)'}</td>
+            <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtCurrency(r.spend)}</td>
+            <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtPct(totalSpend > 0 ? r.spend / totalSpend : 0)}</td>
+            <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600 }}>{fmtCurrency(r.pmr)}</td>
+            <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtPct(totalPmr > 0 ? r.pmr / totalPmr : 0)}</td>
+            <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right' }}><ChangeIndicator c={r.change} /></td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+);
+
+/** Legend / prior-day caption shared by the DoD tables (PMR-based). */
+const DodCaption: React.FC<{ prevDate?: string; label: string }> = ({ prevDate, label }) => (
+  <p style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', margin: 0 }}>
+    {label}{prevDate
+      ? <> — PMR vs <b>{prevDate}</b>. <span style={{ color: 'var(--success)' }}>↑</span> up / <span style={{ color: 'var(--error)' }}>↓</span> down / NEW = not in the prior Top list.</>
+      : <> — no prior day yet, so this run is the baseline.</>}
+  </p>
+);
+
+/** Colour signed deltas (e.g. "+12%" green, "-8%" red, bold) inside plain text. */
+const DELTA_RE = /([+\-]\d+(?:\.\d+)?%)/g;
+const colorizeDeltas = (text: string): React.ReactNode[] => {
+  const out: React.ReactNode[] = [];
+  let last = 0; let key = 0; let m: RegExpExecArray | null;
+  DELTA_RE.lastIndex = 0;
+  while ((m = DELTA_RE.exec(text)) !== null) {
+    if (m.index > last) out.push(text.slice(last, m.index));
+    const up = m[0].startsWith('+');
+    out.push(<strong key={key++} style={{ color: up ? 'var(--success)' : 'var(--error)' }}>{m[0]}</strong>);
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) out.push(text.slice(last));
+  return out;
 };
 
 // ── Insights rendering ──
 // The AI briefing labels its sections in Title Case ("Executive Summary"), the
 // deterministic summary has none, and some models shout in ALL CAPS — treat all
 // three as section headings.
-const SECTION_TITLES = /^(executive summary|key findings?|key takeaways?|recommendations?|summary|findings?|overview|next steps)\s*:?$/i;
+const SECTION_TITLES = /^(executive summary|key points?|key findings?|key takeaways?|key changes?|game changers?|change contributors?|recommendations?|summary|findings?|overview|next steps)\s*:?$/i;
 const isInsightHeading = (l: string) =>
   SECTION_TITLES.test(l) || (/^[A-Z0-9][A-Z0-9 ,&/()\-]{2,39}:?$/.test(l) && !/[a-z]/.test(l));
 const insightBullet = (l: string) => l.match(/^(?:[•\-*]|\d+\.)\s+(.*)$/);
+// A short standalone Title-Case label (no digits/punctuation) is a topic category.
+const isInsightCategory = (l: string) => l.length <= 40 && /^[A-Za-z][A-Za-z &/()'-]*$/.test(l);
 
-/** Bold a short leading "Label:" prefix (e.g. "By region: …") for scannability. */
-const emphasizeLabel = (s: string): React.ReactNode => {
-  const m = s.match(/^([A-Za-z][A-Za-z ()/&-]{1,38}?):\s+(.*)$/);
-  return m ? <><strong>{m[1]}:</strong> {m[2]}</> : s;
-};
+/** Colour signed deltas in a line (no label auto-bolding). */
+const emphasizeLabel = (s: string): React.ReactNode => <>{colorizeDeltas(s)}</>;
 
 /** Render the Insights narrative professionally: ALL-CAPS lines become section
     subheadings, "• / - / 1." lines become hanging bullets, and "Label:" prefixes
@@ -116,6 +198,13 @@ const InsightsBody: React.FC<{ text: string }> = ({ text }) => {
               <span style={{ color: 'var(--primary)', flexShrink: 0 }}>•</span>
               <span>{emphasizeLabel(b[1])}</span>
             </div>
+          );
+        }
+        if (!b && isInsightCategory(core)) {
+          return (
+            <p key={i} style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-primary)', margin: '0.7rem 0 0.2rem' }}>
+              {core.replace(/:$/, '')}
+            </p>
           );
         }
         return <p key={i} style={{ margin: '0.4rem 0', lineHeight: 1.65 }}>{emphasizeLabel(line)}</p>;
@@ -255,6 +344,8 @@ export const TopBundleAnalysis: React.FC = () => {
   const [logExpanded, setLogExpanded] = useState(true);
   const addLog = (level: LogEntry['level'], msg: string) =>
     setLogs((prev) => [...prev, { ts: new Date().toLocaleTimeString('en-GB'), level, msg }]);
+  // Guards against a slow AI-narrative call from an earlier run overwriting a newer one.
+  const runIdRef = useRef(0);
 
   // ── results ──
   const [rows, setRows] = useState<BundleRow[]>([]);
@@ -272,8 +363,10 @@ export const TopBundleAnalysis: React.FC = () => {
   // ── derived analysis ──
   const summaries = useMemo<ReportSummaries>(() => ({
     topBundles: topBundles(rows),
-    topPublishers: topPublishers(rows),
-    byDsp: byDsp(rows), byCountry: byCountry(rows),
+    topPublishers: topPublishers(rows, 20),
+    gckPublishers: gckPublishers(rows, 20),
+    byDsp: byDsp(rows), dspGroups: dspWithBundles(rows, 10, 5),
+    byCountry: byCountry(rows, 10),
     byRegion: byRegion(rows), byPod: byPod(rows),
     adFormatPivot: adFormatPivot(rows), bundlePublisher: bundlePublisherBreakdown(rows),
   }), [rows]);
@@ -281,6 +374,13 @@ export const TopBundleAnalysis: React.FC = () => {
   const metrics = useMemo(() => computeMetrics(rows), [rows]);
   const [changeMap, setChangeMap] = useState<Record<string, BundleChange>>({});
   const [pubDayOverDay, setPubDayOverDay] = useState<PublisherDayOverDay | null>(null);
+  const [gckDayOverDay, setGckDayOverDay] = useState<PublisherDayOverDay | null>(null);
+  const [regionDayOverDay, setRegionDayOverDay] = useState<DimDayOverDay | null>(null);
+  const [podDayOverDay, setPodDayOverDay] = useState<DimDayOverDay | null>(null);
+  const [dspDayOverDay, setDspDayOverDay] = useState<DimDayOverDay | null>(null);
+  const [countryDayOverDay, setCountryDayOverDay] = useState<DimDayOverDay | null>(null);
+  const [adFormatDayOverDay, setAdFormatDayOverDay] = useState<DimDayOverDay | null>(null);
+  const [overallDoD, setOverallDoD] = useState<OverallDoD | null>(null);
 
   const missingRequired = REQUIRED_FIELDS.filter((f) => !mapping[f]);
   const needsBundleOrDomain = !mapping.bundle && !mapping.domain;
@@ -325,6 +425,7 @@ export const TopBundleAnalysis: React.FC = () => {
   const handleAnalyze = async () => {
     setError(''); setEmailStatus('');
     if (!mappingValid) { setError('Map the required columns first (Platform, Spend, Paid Impressions, and Bundle or Domain).'); return; }
+    const myRun = ++runIdRef.current;
     setRunState('analyzing');
 
     const std = standardizeMapped(parsedRows, mapping);
@@ -335,7 +436,6 @@ export const TopBundleAnalysis: React.FC = () => {
       return;
     }
     setRows(std);
-    setSummaryText(generateStructuredSummary(std, reportDate));
 
     const plats = [...new Set(std.map((r) => r.platform))];
     addLog('info', `Analyzed ${std.length} rows. Platform values: ${plats.join(', ')}`);
@@ -343,26 +443,95 @@ export const TopBundleAnalysis: React.FC = () => {
     if (inApp(std).length === 0) {
       addLog('warn', 'No rows matched the mobile in-app buckets (Mobile App Android / Mobile App iOS). If your Platform values differ, tell me the exact values and I will map them.');
     }
+    const podsSeen = [...new Set(inApp(std).map((r) => r.pod).filter(Boolean))];
+    addLog('info', `POD values: ${podsSeen.join(', ') || '(none)'}. GCK POD rows: ${inApp(std).filter((r) => isGckPod(r.pod)).length}.`);
 
-    // Day-over-day vs the most recent prior run.
+    // Persist today's snapshot immediately (keyed by date) so it survives even if a newer run
+    // supersedes this one during the async steps below — day-over-day only diffs EARLIER dates.
+    saveDaySnapshots(reportDate, std);
+
+    // ── If there's no prior day on record, backfill the MOST RECENT prior day from Slack
+    //    (by filename date — auto-skips weekends/holidays/gaps), same as the headless job. ──
+    if (!previousDailyTotals(reportDate)) {
+      try {
+        addLog('info', `No prior day on record — fetching the most recent prior day from Slack (before ${reportDate})…`);
+        const res = await fetchPriorFromSlack(reportDate);
+        if (myRun !== runIdRef.current) return;
+        if (!res) {
+          addLog('warn', 'No earlier TSV found in Slack — running as baseline (no day-over-day).');
+        } else {
+          const pPrev = parseCsvText(res.text, res.filename);
+          const stdPrev = standardizeMapped(pPrev.rows, autoMap(pPrev.headers));
+          if (stdPrev.length) {
+            saveDaySnapshots(res.date, stdPrev);
+            addLog('info', `Backfilled ${res.date} from Slack (${res.filename}, ${stdPrev.length} rows) — day-over-day now available.`);
+          } else {
+            addLog('warn', `Prior file ${res.filename} produced 0 usable rows.`);
+          }
+        }
+      } catch (e) {
+        addLog('warn', `Slack backfill failed: ${(e as Error).message.slice(0, 120)}`);
+      }
+    }
+
+    // ── Day-over-day vs the most recent prior day on record (diff before saving today) ──
+    // Bundle-level (drives the "vs prev" column on Top Bundles).
     const ranked = topBundles(std, 200);
-    const prev = previousSnapshot(reportDate);
-    const dod = prev ? diffTopN(ranked, prev, 50) : null;
-    setChangeMap(bundleChangeMap(ranked, prev, 50));
-    saveSnapshot(reportDate, ranked);
-    if (dod) addLog('info', `Day-over-day vs ${dod.prevDate}: ${dod.newEntrants.length} new, ${dod.dropped.length} dropped, ${dod.movers.length} big movers in top 50.`);
-    else addLog('info', 'Day-over-day: no prior day on record — baseline saved.');
+    const prevBundles = previousSnapshot(reportDate);
+    const bundleDod = prevBundles ? diffTopN(ranked, prevBundles, 50) : null;
+    setChangeMap(bundleChangeMap(ranked, prevBundles, 50));
 
-    // Publisher-level day-over-day (shown in the results — easier to read than bundles).
+    // Publisher-level — overall market and GCK POD; plus GCK bundles (for the GCK deep-dive).
     const rankedPubs = topPublishers(std, 100);
-    const prevPubs = previousPublisherSnapshot(reportDate);
-    const pubDod = diffPublishers(rankedPubs, prevPubs, 20);
+    const pubDod = diffPublishers(rankedPubs, previousPublisherSnapshot(reportDate, 'all'), 20);
     setPubDayOverDay(pubDod);
-    savePublisherSnapshot(reportDate, rankedPubs);
+    const rankedGck = gckPublishers(std, 100);
+    const gckDod = diffPublishers(rankedGck, previousPublisherSnapshot(reportDate, 'gck'), 20);
+    setGckDayOverDay(gckDod);
+    const gckBundleDod = diffDim(gckBundles(std, 50), previousDimSnapshot('gckbundle', reportDate), 'appName', 20);
+
+    // Dimension-level — region / POD / DSP / country / ad format (feed the display tables + AI attribution).
+    const regionRanked = byRegion(std);
+    const podRanked = byPod(std, 30);
+    const dspRanked = byDsp(std, 30);
+    const countryRanked = byCountry(std, 30);
+    const adFormatRanked = byAdFormat(std, 30);
+    const regionDod = diffDim(regionRanked, previousDimSnapshot('region', reportDate), 'region', 10);
+    const podDod = diffDim(podRanked, previousDimSnapshot('pod', reportDate), 'pod', 10);
+    const dspDod = diffDim(dspRanked, previousDimSnapshot('dsp', reportDate), 'dsp', 10);
+    const countryDod = diffDim(countryRanked, previousDimSnapshot('country', reportDate), 'country', 10);
+    const adFormatDod = diffDim(adFormatRanked, previousDimSnapshot('adFormat', reportDate), 'adFormat', 12);
+    setRegionDayOverDay(regionDod);
+    setPodDayOverDay(podDod);
+    setDspDayOverDay(dspDod);
+    setCountryDayOverDay(countryDod);
+    setAdFormatDayOverDay(adFormatDod);
+
+    // Overall totals — exact headline PMR DoD % for the executive summary.
+    const localMetrics = computeMetrics(std);
+    const totals = { inAppSpend: localMetrics.inAppSpend, pmr: localMetrics.inAppPmr, revenue: localMetrics.totalRevenue };
+    const overall = overallDayOverDay(totals, previousDailyTotals(reportDate));
+    setOverallDoD(overall);
+
+    const dodContext: DoDContext = {
+      overall, bundle: bundleDod, publishers: pubDod, gckPublishers: gckDod, gckBundles: gckBundleDod,
+      region: regionDod, pod: podDod, dsp: dspDod, country: countryDod, adFormat: adFormatDod,
+    };
+
+    // Deterministic executive summary first (immediate render + AI fallback), with attribution.
+    setSummaryText(generateStructuredSummary(std, reportDate, dodContext));
+
+    if (overall && overall.pmrDeltaPct !== null) {
+      addLog('info', `Overall in-app PMR DoD vs ${overall.prevDate}: ${overall.pmrDeltaPct >= 0 ? '+' : ''}${Math.round(overall.pmrDeltaPct * 100)}% (spend ${overall.spendDeltaPct !== null ? (overall.spendDeltaPct >= 0 ? '+' : '') + Math.round(overall.spendDeltaPct * 100) + '%' : 'n/a'}).`);
+    } else {
+      addLog('info', 'Day-over-day: no prior day on record — baseline saved.');
+    }
+    if (localMetrics.inAppPmr <= 0) addLog('warn', 'In-app PMR is $0 — check that the PMR (PubMatic revenue) column is present and mapped, otherwise PMR metrics stay empty.');
+    if (bundleDod) addLog('info', `Bundle DoD vs ${bundleDod.prevDate}: ${bundleDod.newEntrants.length} new, ${bundleDod.dropped.length} dropped, ${bundleDod.movers.length} big movers in top 50.`);
     if (pubDod) {
       const ups = pubDod.rows.filter((r) => r.status === 'up').length;
       const downs = pubDod.rows.filter((r) => r.status === 'down').length;
-      addLog('info', `Publisher day-over-day vs ${pubDod.prevDate}: ${ups} up, ${downs} down in top ${pubDod.topN}.`);
+      addLog('info', `Publisher DoD vs ${pubDod.prevDate}: ${ups} up, ${downs} down in top ${pubDod.topN}.`);
     }
 
     setRunState('done');
@@ -370,17 +539,19 @@ export const TopBundleAnalysis: React.FC = () => {
     {
       const localSummaries: ReportSummaries = {
         topBundles: topBundles(std),
-        topPublishers: topPublishers(std), byDsp: byDsp(std), byCountry: byCountry(std),
+        topPublishers: topPublishers(std, 20), gckPublishers: gckPublishers(std, 20),
+        byDsp: byDsp(std), dspGroups: dspWithBundles(std, 10, 5), byCountry: byCountry(std, 10),
         byRegion: byRegion(std), byPod: byPod(std),
         adFormatPivot: adFormatPivot(std), bundlePublisher: bundlePublisherBreakdown(std),
       };
-      const localMetrics = computeMetrics(std);
       addLog('info', `Generating AI narrative via PubMatic Brain (${llmConfig.environment}, ${llmConfig.model})...`);
       try {
-        const narrative = await generateNarrative(localSummaries, localMetrics, reportDate, llmConfig, dod);
+        const narrative = await generateNarrative(localSummaries, localMetrics, reportDate, llmConfig, dodContext);
+        if (myRun !== runIdRef.current) return;   // a newer run started — don't clobber it
         if (narrative.trim()) { setSummaryText(stripMarkdown(narrative)); addLog('info', 'AI narrative generated'); }
         else addLog('warn', 'AI returned an empty narrative — keeping the structured summary.');
       } catch (e) {
+        if (myRun !== runIdRef.current) return;
         addLog('warn', `AI narrative unavailable (${(e as Error).message.slice(0, 150)}) — keeping the structured summary.`);
       }
     }
@@ -398,7 +569,12 @@ export const TopBundleAnalysis: React.FC = () => {
   };
   const handleSendEmail = async () => {
     setSending(true); setEmailStatus(''); setEmailOk(null);
-    const html = buildEmailHtml(summaries, summaryText, metrics, reportDate, pubDayOverDay, changeMap);
+    const emailDoD: EmailDoD = {
+      overall: overallDoD, publishers: pubDayOverDay, gckPublishers: gckDayOverDay,
+      region: regionDayOverDay, pod: podDayOverDay, dsp: dspDayOverDay,
+      country: countryDayOverDay, adFormat: adFormatDayOverDay, bundleChangeMap: changeMap,
+    };
+    const html = buildEmailHtml(summaries, summaryText, metrics, reportDate, emailDoD);
     const res = await sendEmail({
       subject: buildEmailSubject(reportDate), html,
       // Attachment = the clean, partner-shareable list (no spend), same as the XLSX export.
@@ -449,7 +625,7 @@ export const TopBundleAnalysis: React.FC = () => {
             <span className="import-tile-icon"><MessageSquare size={18} /></span>
             <h3>Auto-fetch from Slack</h3>
             <p className="import-tile-desc">
-              Grabs the newest CSV/TSV Looker posted to the configured channel (<code>LOOKER_SLACK_CHANNEL</code> in <code>server/.env</code>), preferring TSV. The bot needs <code>files:read</code> and must be in the channel.
+              Grabs the newest dated <b>TSV</b> Looker posted to the configured channel (<code>LOOKER_SLACK_CHANNEL</code> in <code>server/.env</code>) — files are named <code>bundle_performance_YYYYMMDD.tsv</code>; the same-name CSV is ignored. The bot needs <code>files:read</code> and must be in the channel. Missing prior days are auto-backfilled by date for day-over-day.
             </p>
             <button className="btn btn-secondary" style={{ alignSelf: 'flex-start' }}
               onClick={handleFetchSlack} disabled={slackFetching}>
@@ -573,137 +749,68 @@ export const TopBundleAnalysis: React.FC = () => {
             </p>
           </div>
 
-          {/* Top 20 Publishers */}
-          <div className="glass-card animated-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-            <h2 style={{ fontSize: '1.05rem', fontWeight: 600 }}>Top {summaries.topPublishers.length} Publishers</h2>
-            <AggTable rows={summaries.topPublishers} cols={[
-              { label: 'Publisher', get: (r) => r.publisher },
-              { label: 'DSP Spend', get: (r) => fmtCurrency(r.spend), align: 'right' },
-              { label: 'Contribution', get: (r) => fmtPct(metrics.inAppSpend > 0 ? r.spend / metrics.inAppSpend : 0), align: 'right' },
-              { label: 'PMR', get: (r) => fmtCurrency(r.pmr), align: 'right' },
-              { label: 'Pub Revenue', get: (r) => fmtCurrency(r.revenue), align: 'right' },
-              { label: 'eCPM', get: (r) => fmtEcpm(r.ecpm), align: 'right' },
-            ]} />
-          </div>
-
-          {/* Region / POD */}
+          {/* 2-3. Region / POD */}
           <div className="grid-2">
             <div className="glass-card animated-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-              <h2 style={{ fontSize: '1.05rem', fontWeight: 600 }}>By Region</h2>
+              <h2 style={{ fontSize: '1.05rem', fontWeight: 600 }}>2. By Region</h2>
               <AggTable rows={summaries.byRegion} cols={[
                 { label: 'Region', get: (r) => r.region },
                 { label: 'DSP Spend', get: (r) => fmtCurrency(r.spend), align: 'right' },
-                { label: 'Contribution', get: (r) => fmtPct(metrics.inAppSpend > 0 ? r.spend / metrics.inAppSpend : 0), align: 'right' },
+                { label: 'DSP %', get: (r) => fmtPct(metrics.inAppSpend > 0 ? r.spend / metrics.inAppSpend : 0), align: 'right' },
                 { label: 'PMR', get: (r) => fmtCurrency(r.pmr), align: 'right' },
+                { label: 'PMR %', get: (r) => fmtPct(metrics.inAppPmr > 0 ? r.pmr / metrics.inAppPmr : 0), align: 'right' },
+                { label: 'vs prev', get: (r) => <ChangeIndicator c={dimChangeOf(regionDayOverDay, String(r.region ?? ''))} />, align: 'right' },
                 { label: 'eCPM', get: (r) => fmtEcpm(r.ecpm), align: 'right' },
               ]} />
             </div>
             <div className="glass-card animated-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-              <h2 style={{ fontSize: '1.05rem', fontWeight: 600 }}>By POD</h2>
+              <h2 style={{ fontSize: '1.05rem', fontWeight: 600 }}>3. By POD</h2>
               <AggTable rows={summaries.byPod} cols={[
                 { label: 'POD', get: (r) => r.pod },
                 { label: 'Region', get: (r) => r.region },
                 { label: 'DSP Spend', get: (r) => fmtCurrency(r.spend), align: 'right' },
-                { label: 'Contribution', get: (r) => fmtPct(metrics.inAppSpend > 0 ? r.spend / metrics.inAppSpend : 0), align: 'right' },
+                { label: 'DSP %', get: (r) => fmtPct(metrics.inAppSpend > 0 ? r.spend / metrics.inAppSpend : 0), align: 'right' },
+                { label: 'PMR', get: (r) => fmtCurrency(r.pmr), align: 'right' },
+                { label: 'PMR %', get: (r) => fmtPct(metrics.inAppPmr > 0 ? r.pmr / metrics.inAppPmr : 0), align: 'right' },
+                { label: 'vs prev', get: (r) => <ChangeIndicator c={dimChangeOf(podDayOverDay, String(r.pod ?? ''))} />, align: 'right' },
                 { label: 'eCPM', get: (r) => fmtEcpm(r.ecpm), align: 'right' },
               ]} />
             </div>
           </div>
 
-          {/* Day-over-day — by publisher (a bundle alone doesn't tell you the publisher) */}
+          {/* 4. By DSP (Top 10) -> each with its Top 5 bundles */}
           <div className="glass-card animated-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-            <h2 style={{ fontSize: '1.05rem', fontWeight: 600 }}>Publisher day-over-day changes{pubDayOverDay ? ` (top ${pubDayOverDay.rows.length})` : ''}</h2>
-            {!pubDayOverDay ? (
-              <p style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>No prior day on record — this run is the baseline for future comparisons.</p>
-            ) : (
-              <>
-                <p style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', margin: 0 }}>DSP spend vs <b>{pubDayOverDay.prevDate}</b>. <span style={{ color: 'var(--success)' }}>↑</span> up / <span style={{ color: 'var(--error)' }}>↓</span> down / NEW = not in top publishers previously.</p>
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', fontSize: '0.8125rem', borderCollapse: 'collapse' }}>
-                    <thead>
-                      <tr style={{ background: 'var(--primary)', color: 'white', textAlign: 'left' }}>
-                        {['Publisher', 'DSP Spend', 'Contribution', 'vs prev'].map((h, i) => (
-                          <th key={h} style={{ padding: '0.5rem 0.75rem', whiteSpace: 'nowrap', textAlign: i === 0 ? 'left' : 'right' }}>{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {pubDayOverDay.rows.map((r, i) => (
-                        <tr key={r.publisher || i} style={{ background: i % 2 ? '#f8fafc' : 'white', borderBottom: '1px solid #e5e7eb' }}>
-                          <td style={{ padding: '0.5rem 0.75rem' }}>{r.publisher || '(unknown)'}</td>
-                          <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtCurrency(r.spend)}</td>
-                          <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtPct(metrics.inAppSpend > 0 ? r.spend / metrics.inAppSpend : 0)}</td>
-                          <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right' }}><ChangeIndicator c={r} /></td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </>
-            )}
-          </div>
-
-          <div className="glass-card animated-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-            <h2 style={{ fontSize: '1.05rem', fontWeight: 600 }}>Top In-App Bundles (top {summaries.topBundles.length})</h2>
-            <AggTable rows={summaries.topBundles} cols={[
-              { label: 'Bundle', get: (r) => r.bundle },
-              { label: 'App', get: (r) => r.appName },
-              { label: 'Platform', get: (r) => r.platform },
-              { label: 'DSP Spend', get: (r) => fmtCurrency(r.spend), align: 'right' },
-              { label: 'Contribution', get: (r) => fmtPct(metrics.inAppSpend > 0 ? r.spend / metrics.inAppSpend : 0), align: 'right' },
-              { label: 'eCPM', get: (r) => fmtEcpm(r.ecpm), align: 'right' },
-              { label: 'vs prev', get: (r) => changeLabel(changeMap[String(r.bundle ?? '')]), align: 'right' },
-            ]} />
-          </div>
-
-          <div className="grid-2">
-            <div className="glass-card animated-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-              <h2 style={{ fontSize: '1.05rem', fontWeight: 600 }}>By DSP</h2>
-              <AggTable rows={summaries.byDsp} cols={[
-                { label: 'DSP', get: (r) => r.dsp },
-                { label: 'DSP Spend', get: (r) => fmtCurrency(r.spend), align: 'right' },
-                { label: 'Contribution', get: (r) => fmtPct(metrics.inAppSpend > 0 ? r.spend / metrics.inAppSpend : 0), align: 'right' },
-                { label: 'eCPM', get: (r) => fmtEcpm(r.ecpm), align: 'right' },
-              ]} />
-            </div>
-            <div className="glass-card animated-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-              <h2 style={{ fontSize: '1.05rem', fontWeight: 600 }}>By Country</h2>
-              <AggTable rows={summaries.byCountry} cols={[
-                { label: 'Country', get: (r) => r.country },
-                { label: 'DSP Spend', get: (r) => fmtCurrency(r.spend), align: 'right' },
-                { label: 'Contribution', get: (r) => fmtPct(metrics.inAppSpend > 0 ? r.spend / metrics.inAppSpend : 0), align: 'right' },
-                { label: 'eCPM', get: (r) => fmtEcpm(r.ecpm), align: 'right' },
-              ]} />
-            </div>
-          </div>
-
-          {/* Ad Format -> Size pivot */}
-          <div className="glass-card animated-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-            <h2 style={{ fontSize: '1.05rem', fontWeight: 600 }}>By Ad Format &amp; Size</h2>
+            <h2 style={{ fontSize: '1.05rem', fontWeight: 600 }}>4. By DSP (Top {summaries.dspGroups.length}, each with Top 5 bundles)</h2>
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', fontSize: '0.8125rem', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ background: 'var(--primary)', color: 'white' }}>
-                    {['Ad Format / Size', 'DSP Spend', 'Contribution', 'eCPM'].map((h, i) => (
+                    {['DSP / Bundle', 'DSP Spend', 'DSP %', 'PMR', 'PMR %', 'vs prev', 'eCPM'].map((h, i) => (
                       <th key={h} style={{ padding: '0.5rem 0.75rem', textAlign: i === 0 ? 'left' : 'right' }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {summaries.adFormatPivot.map((g) => (
-                    <React.Fragment key={g.adFormat}>
+                  {summaries.dspGroups.map((g) => (
+                    <React.Fragment key={g.dsp}>
                       <tr style={{ background: '#eef2f8', fontWeight: 700 }}>
-                        <td style={{ padding: '0.5rem 0.75rem' }}>{g.adFormat}</td>
+                        <td style={{ padding: '0.5rem 0.75rem' }}>{g.dsp}</td>
                         <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtCurrency(g.spend)}</td>
-                        <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtPct(g.share)}</td>
+                        <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtPct(g.spendShare)}</td>
+                        <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtCurrency(g.pmr)}</td>
+                        <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtPct(g.pmrShare)}</td>
+                        <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right' }}><ChangeIndicator c={dimChangeOf(dspDayOverDay, g.dsp)} /></td>
                         <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtEcpm(g.ecpm)}</td>
                       </tr>
-                      {g.sizes.map((s) => (
-                        <tr key={g.adFormat + s.adSize} style={{ borderBottom: '1px solid #eee' }}>
-                          <td style={{ padding: '0.4rem 0.75rem 0.4rem 1.75rem', color: 'var(--text-secondary)' }}>{s.adSize}</td>
-                          <td style={{ padding: '0.4rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtCurrency(s.spend)}</td>
-                          <td style={{ padding: '0.4rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtPct(s.shareOfFormat)}</td>
-                          <td style={{ padding: '0.4rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtEcpm(s.ecpm)}</td>
+                      {g.rows.map((b, j) => (
+                        <tr key={g.dsp + j} style={{ borderBottom: '1px solid #eee' }}>
+                          <td style={{ padding: '0.4rem 0.75rem 0.4rem 1.75rem', color: 'var(--text-secondary)' }}>{b.appName} <span style={{ color: '#999', fontFamily: 'monospace' }}>{b.bundle}</span></td>
+                          <td style={{ padding: '0.4rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtCurrency(b.spend)}</td>
+                          <td style={{ padding: '0.4rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtPct(b.spendShareOfDsp)}</td>
+                          <td style={{ padding: '0.4rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtCurrency(b.pmr)}</td>
+                          <td style={{ padding: '0.4rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtPct(b.pmrShareOfDsp)}</td>
+                          <td />
+                          <td style={{ padding: '0.4rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtEcpm(b.ecpm)}</td>
                         </tr>
                       ))}
                     </React.Fragment>
@@ -711,17 +818,37 @@ export const TopBundleAnalysis: React.FC = () => {
                 </tbody>
               </table>
             </div>
-            <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', margin: 0 }}>Format rows = % of total in-app spend; size rows = % within that format. Multi-format rows (e.g. &quot;Display + Native + Video&quot;) are our multi-format requests.</p>
+            <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', margin: 0 }}>Group rows = share of total in-app (DSP % of spend, PMR % of PMR) with PMR vs prev; indented bundle rows = share within that DSP.</p>
           </div>
 
-          {/* By Bundle & Publisher (hierarchical: bundle -> publisher x ad format) */}
+          {/* 5. Publisher day-over-day — overall market Top 20 (大盘 Top 20) */}
           <div className="glass-card animated-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-            <h2 style={{ fontSize: '1.05rem', fontWeight: 600 }}>By Bundle &amp; Publisher (top {summaries.bundlePublisher.length})</h2>
+            <h2 style={{ fontSize: '1.05rem', fontWeight: 600 }}>5. Publisher Day-over-Day Changes — Overall Top {summaries.topPublishers.length}</h2>
+            <DodCaption prevDate={pubDayOverDay?.prevDate} label={`Whole-market Top ${summaries.topPublishers.length} publishers, ranked by in-app PMR`} />
+            <DodTable firstCol="Publisher" rows={pubDodRows(summaries.topPublishers, pubDayOverDay)} totalSpend={metrics.inAppSpend} totalPmr={metrics.inAppPmr} />
+          </div>
+
+          {/* 6. GCK POD Top 20 publishers */}
+          <div className="glass-card animated-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            <h2 style={{ fontSize: '1.05rem', fontWeight: 600 }}>6. GCK POD — Top {summaries.gckPublishers.length} Publishers</h2>
+            {summaries.gckPublishers.length === 0 ? (
+              <p style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>No rows matched the GCK POD. Check the POD column values listed in the Run Log.</p>
+            ) : (
+              <>
+                <DodCaption prevDate={gckDayOverDay?.prevDate} label={`GCK POD publishers only, ranked by in-app PMR`} />
+                <DodTable firstCol="Publisher" rows={pubDodRows(summaries.gckPublishers, gckDayOverDay)} totalSpend={metrics.inAppSpend} totalPmr={metrics.inAppPmr} />
+              </>
+            )}
+          </div>
+
+          {/* 7. Top Bundles (Top 20) merged with publisher breakdown + DoD */}
+          <div className="glass-card animated-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            <h2 style={{ fontSize: '1.05rem', fontWeight: 600 }}>7. Top Bundles (Top {summaries.bundlePublisher.length})</h2>
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', fontSize: '0.8125rem', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ background: 'var(--primary)', color: 'white' }}>
-                    {['App / Publisher', 'Ad Formats', '% of bundle', 'DSP Spend', 'Contribution', 'eCPM'].map((h, i) => (
+                    {['App / Publisher', 'Ad Formats', 'DSP Spend', 'DSP %', 'PMR', 'PMR %', 'eCPM', 'vs prev'].map((h, i) => (
                       <th key={h} style={{ padding: '0.5rem 0.75rem', textAlign: i >= 2 ? 'right' : 'left' }}>{h}</th>
                     ))}
                   </tr>
@@ -732,19 +859,23 @@ export const TopBundleAnalysis: React.FC = () => {
                       <tr style={{ background: '#eef2f8', fontWeight: 700 }}>
                         <td style={{ padding: '0.5rem 0.75rem' }}>{g.appName} <span style={{ color: '#777', fontWeight: 400, fontFamily: 'monospace' }}>{g.bundle}</span></td>
                         <td />
-                        <td />
                         <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtCurrency(g.spend)}</td>
-                        <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtPct(g.share)}</td>
+                        <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtPct(g.spendShare)}</td>
+                        <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtCurrency(g.pmr)}</td>
+                        <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtPct(g.pmrShare)}</td>
                         <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtEcpm(g.ecpm)}</td>
+                        <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right' }}><ChangeIndicator c={changeMap[String(g.bundle ?? '')] ?? null} /></td>
                       </tr>
                       {g.rows.map((r, j) => (
                         <tr key={g.bundle + j} style={{ borderBottom: '1px solid #eee' }}>
                           <td style={{ padding: '0.4rem 0.75rem 0.4rem 1.75rem', color: 'var(--text-secondary)' }}>{r.publisher}</td>
                           <td style={{ padding: '0.4rem 0.75rem' }}>{r.formats.join(', ')}</td>
-                          <td style={{ padding: '0.4rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtPct(r.shareOfBundle)}</td>
                           <td style={{ padding: '0.4rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtCurrency(r.spend)}</td>
-                          <td />
+                          <td style={{ padding: '0.4rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtPct(r.spendShareOfBundle)}</td>
+                          <td style={{ padding: '0.4rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtCurrency(r.pmr)}</td>
+                          <td style={{ padding: '0.4rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtPct(r.pmrShareOfBundle)}</td>
                           <td style={{ padding: '0.4rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtEcpm(r.ecpm)}</td>
+                          <td />
                         </tr>
                       ))}
                     </React.Fragment>
@@ -752,6 +883,57 @@ export const TopBundleAnalysis: React.FC = () => {
                 </tbody>
               </table>
             </div>
+            <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', margin: 0 }}>Group rows = share of total in-app (DSP % / PMR %); indented publisher rows = share within that bundle. &quot;vs prev&quot; = the bundle&apos;s PMR day-over-day change.</p>
+          </div>
+
+          {/* 8. By Country (Top 10) with DoD */}
+          <div className="glass-card animated-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            <h2 style={{ fontSize: '1.05rem', fontWeight: 600 }}>8. By Country (Top {summaries.byCountry.length})</h2>
+            <DodCaption prevDate={countryDayOverDay?.prevDate} label={`Top ${summaries.byCountry.length} countries, ranked by in-app PMR`} />
+            <DodTable firstCol="Country" rows={dimDodRows(summaries.byCountry, countryDayOverDay, 'country')} totalSpend={metrics.inAppSpend} totalPmr={metrics.inAppPmr} />
+          </div>
+
+          {/* 9. Ad Format -> Size pivot (Display capped to Top 5 sizes) */}
+          <div className="glass-card animated-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            <h2 style={{ fontSize: '1.05rem', fontWeight: 600 }}>9. By Ad Format &amp; Size</h2>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', fontSize: '0.8125rem', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ background: 'var(--primary)', color: 'white' }}>
+                    {['Ad Format / Size', 'DSP Spend', 'DSP %', 'PMR', 'PMR %', 'vs prev', 'eCPM'].map((h, i) => (
+                      <th key={h} style={{ padding: '0.5rem 0.75rem', textAlign: i === 0 ? 'left' : 'right' }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {summaries.adFormatPivot.map((g) => (
+                    <React.Fragment key={g.adFormat}>
+                      <tr style={{ background: '#eef2f8', fontWeight: 700 }}>
+                        <td style={{ padding: '0.5rem 0.75rem' }}>{g.adFormat}</td>
+                        <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtCurrency(g.spend)}</td>
+                        <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtPct(g.spendShare)}</td>
+                        <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtCurrency(g.pmr)}</td>
+                        <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtPct(g.pmrShare)}</td>
+                        <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right' }}><ChangeIndicator c={dimChangeOf(adFormatDayOverDay, g.adFormat)} /></td>
+                        <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtEcpm(g.ecpm)}</td>
+                      </tr>
+                      {g.sizes.map((s) => (
+                        <tr key={g.adFormat + s.adSize} style={{ borderBottom: '1px solid #eee' }}>
+                          <td style={{ padding: '0.4rem 0.75rem 0.4rem 1.75rem', color: 'var(--text-secondary)' }}>{s.adSize}</td>
+                          <td style={{ padding: '0.4rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtCurrency(s.spend)}</td>
+                          <td style={{ padding: '0.4rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtPct(s.spendShareOfFormat)}</td>
+                          <td style={{ padding: '0.4rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtCurrency(s.pmr)}</td>
+                          <td style={{ padding: '0.4rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtPct(s.pmrShareOfFormat)}</td>
+                          <td />
+                          <td style={{ padding: '0.4rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtEcpm(s.ecpm)}</td>
+                        </tr>
+                      ))}
+                    </React.Fragment>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', margin: 0 }}>Format rows = share of total in-app (DSP % / PMR %) with PMR vs prev; size rows = share within that format. Display is limited to its Top 5 sizes. Multi-format rows (e.g. &quot;Display + Native + Video&quot;) are multi-format requests.</p>
           </div>
 
           <div className="glass-card animated-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>

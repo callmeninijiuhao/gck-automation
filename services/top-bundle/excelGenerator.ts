@@ -5,7 +5,7 @@ import * as XLSX from 'xlsx';
 import { AggRow, BundleRow, PartnerRow, TOP_BUNDLE_CONFIG } from './types';
 import { AnalysisMetrics, AdFormatGroup, BundleGroup, fmtCurrency, fmtEcpm } from './dataProcessor';
 import { ReportSummaries } from './reportBuilder';
-import { DayOverDay, BundleChange, changeLabel } from './history';
+import { DayOverDay, BundleChange, changeArrow } from './history';
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 const pct = (v: number, base: number) => (base > 0 ? r2((v / base) * 100) : 0);
@@ -31,7 +31,7 @@ export class TopBundleExcel {
     this.aggSheet(wb, 'By Country', summaries.byCountry, ['country'], ['Country'], ia);
     this.aggSheet(wb, 'By DSP', summaries.byDsp, ['dsp'], ['DSP'], ia);
     this.pivotSheet(wb, summaries.adFormatPivot);
-    this.bundlePublisherSheet(wb, summaries.bundlePublisher, ia);
+    this.bundlePublisherSheet(wb, summaries.bundlePublisher, metrics.inAppPmr);
     this.dayOverDaySheet(wb, dayOverDay);
     this.partnerSheet(wb, partner);
     this.rawSheets(wb, rows);
@@ -87,7 +87,7 @@ export class TopBundleExcel {
     const data: (string | number)[][] = [header];
     for (const r of rows) {
       const row: (string | number)[] = [...keys.map((k) => String((r as any)[k] ?? '')), r2(r.spend), pct(r.spend, inAppSpend), r2(r.pmr), r2(r.ecpm)];
-      if (changeMap) row.push(changeLabel(changeMap[String((r as any)[keys[0]] ?? '')]));
+      if (changeMap) row.push(changeArrow(changeMap[String((r as any)[keys[0]] ?? '')]));
       data.push(row);
     }
     const sheet = XLSX.utils.aoa_to_sheet(data);
@@ -96,28 +96,28 @@ export class TopBundleExcel {
   }
 
   private static pivotSheet(wb: XLSX.WorkBook, groups: AdFormatGroup[]): void {
-    const header = ['Ad Format / Size', 'DSP Spend', 'Contribution %', 'eCPM'];
+    const header = ['Ad Format / Size', 'DSP Spend', 'PMR', 'PMR %', 'eCPM'];
     const data: (string | number)[][] = [header];
     for (const g of groups) {
-      data.push([g.adFormat, r2(g.spend), r2(g.share * 100), r2(g.ecpm)]);
-      for (const s of g.sizes) data.push([`  → ${s.adSize}`, r2(s.spend), r2(s.shareOfFormat * 100), r2(s.ecpm)]);
+      data.push([g.adFormat, r2(g.spend), r2(g.pmr), r2(g.pmrShare * 100), r2(g.ecpm)]);
+      for (const s of g.sizes) data.push([`  → ${s.adSize}`, r2(s.spend), r2(s.pmr), r2(s.pmrShareOfFormat * 100), r2(s.ecpm)]);
     }
     const sheet = XLSX.utils.aoa_to_sheet(data);
-    sheet['!cols'] = [{ wch: 30 }, { wch: 14 }, { wch: 14 }, { wch: 12 }];
+    sheet['!cols'] = [{ wch: 30 }, { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 12 }];
     XLSX.utils.book_append_sheet(wb, sheet, 'By Ad Format & Size');
   }
 
-  private static bundlePublisherSheet(wb: XLSX.WorkBook, groups: BundleGroup[], inAppSpend: number): void {
-    const header = ['App / Publisher', 'Bundle', 'Ad Formats', '% of bundle', 'DSP Spend', 'Contribution %', 'eCPM'];
+  private static bundlePublisherSheet(wb: XLSX.WorkBook, groups: BundleGroup[], totalPmr: number): void {
+    const header = ['App / Publisher', 'Bundle', 'Ad Formats', 'PMR % of bundle', 'DSP Spend', 'PMR', 'PMR %', 'eCPM'];
     const data: (string | number)[][] = [header];
     for (const g of groups) {
-      data.push([g.appName, g.bundle, '', '', r2(g.spend), pct(g.spend, inAppSpend), r2(g.ecpm)]);
+      data.push([g.appName, g.bundle, '', '', r2(g.spend), r2(g.pmr), pct(g.pmr, totalPmr), r2(g.ecpm)]);
       for (const r of g.rows) {
-        data.push([`  → ${r.publisher}`, '', r.formats.join(', '), r2(r.shareOfBundle * 100), r2(r.spend), '', r2(r.ecpm)]);
+        data.push([`  → ${r.publisher}`, '', r.formats.join(', '), r2(r.pmrShareOfBundle * 100), r2(r.spend), r2(r.pmr), '', r2(r.ecpm)]);
       }
     }
     const sheet = XLSX.utils.aoa_to_sheet(data);
-    sheet['!cols'] = [{ wch: 34 }, { wch: 28 }, { wch: 22 }, { wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 10 }];
+    sheet['!cols'] = [{ wch: 34 }, { wch: 28 }, { wch: 22 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 10 }];
     XLSX.utils.book_append_sheet(wb, sheet, 'Bundle & Publisher');
   }
 
