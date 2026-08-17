@@ -52,7 +52,7 @@ export class TopBundleExcel {
 
   private static summarySheet(wb: XLSX.WorkBook, m: AnalysisMetrics, dateLabel: string): void {
     const data = [
-      ['Bundle Level Analysis'],
+      ['DoD Performance Change Analysis'],
       ['Report date', dateLabel],
       ['Generated', new Date().toLocaleString()],
       [''],

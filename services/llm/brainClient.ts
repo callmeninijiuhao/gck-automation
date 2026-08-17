@@ -61,6 +61,19 @@ export const DEFAULT_LLM_CONFIG: LlmConfig = {
 
 const endpointFor = (env: BrainEnv) => `${BRAIN_BASE_URL[env]}/v1/chat/completions`;
 
+/** Hard ceiling on a single Brain call so a hung request can't leave the UI stuck
+    "Reviewing…" forever. Generous enough for a reasoning model's thinking budget. */
+const LLM_TIMEOUT_MS = 120000;
+
+/** Reject a promise if it doesn't settle within `ms` (used for the Tauri path, which
+    can't be cancelled from JS — the request is orphaned but the caller stops waiting). */
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`LLM request timed out after ${ms / 1000}s`)), ms);
+    p.then((v) => { clearTimeout(timer); resolve(v); }, (e) => { clearTimeout(timer); reject(e); });
+  });
+}
+
 /** Pull the assistant text out of an OpenAI-compatible response. Handles Claude/Bedrock
     responses where message.content is an array of {type,text} blocks. */
 export function extractContent(text: string): string {
@@ -82,21 +95,35 @@ export async function chatComplete(messages: ChatMessage[], cfg: LlmConfig): Pro
   let raw: string;
   if (isTauri()) {
     if (!cfg.apiKey) throw new Error('LLM API key not set — add it in the tool\'s LLM settings.');
-    const res = await nativeFetch(endpointFor(cfg.environment), {
+    const res = await withTimeout(nativeFetch(endpointFor(cfg.environment), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.apiKey}` },
       body: JSON.stringify(payload),
-    });
+    }), LLM_TIMEOUT_MS);
     if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.text.slice(0, 300)}`);
     raw = res.text;
   } else {
     // Dev/browser: key is added server-side from server/.env.
-    const resp = await fetch(`${PROXY_BASE}/api/llm`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    raw = await resp.text();
+    // AbortController cancels the socket on timeout so a hung Brain call can't stall the UI.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
+    let resp: Response;
+    try {
+      resp = await fetch(`${PROXY_BASE}/api/llm`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
+      raw = await resp.text();
+    } catch (e) {
+      if ((e as any)?.name === 'AbortError' || controller.signal.aborted) {
+        throw new Error(`LLM request timed out after ${LLM_TIMEOUT_MS / 1000}s — no response from the Brain API.`);
+      }
+      throw e;
+    } finally {
+      clearTimeout(timer);
+    }
     if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${raw.slice(0, 300)}`);
     // The server returns the raw upstream JSON, or { ok:false, error } on failure.
     try {

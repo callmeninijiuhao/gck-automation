@@ -55,12 +55,12 @@ export const SellerDomainShooter: React.FC = () => {
     };
 
     return (
-        <div className="space-y-8 animate-fade-in">
+        <div className="ap-shooter-scope animate-fade-in">
             {/* Header Section */}
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                <div>
-                    <h1 className="text-3xl font-bold text-pubmatic-navy tracking-tight">Seller Domain Shooter</h1>
-                    <p className="text-gray-500 mt-2">Search competitor sellers.json files to verify publisher presence and troubleshoot domain mismatches.</p>
+                <div className="page-header">
+                    <h1>Seller Domain Shooter</h1>
+                    <p>Search competitor sellers.json files to verify publisher presence and troubleshoot domain mismatches.</p>
                 </div>
             </div>
 

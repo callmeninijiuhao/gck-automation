@@ -27,7 +27,7 @@ export const NAV_STRUCTURE: NavItem[] = [
     children: [
       {
         id: 'top-bundle-analysis',
-        label: 'Bundle Level Analysis',
+        label: 'DoD Performance Change Analysis',
         path: '/top-bundle-analysis',
         icon: Boxes
       },

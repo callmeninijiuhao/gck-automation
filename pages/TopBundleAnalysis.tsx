@@ -346,6 +346,8 @@ export const TopBundleAnalysis: React.FC = () => {
     setLogs((prev) => [...prev, { ts: new Date().toLocaleTimeString('en-GB'), level, msg }]);
   // Guards against a slow AI-narrative call from an earlier run overwriting a newer one.
   const runIdRef = useRef(0);
+  // Scroll target so clicking "Analyze" visibly jumps to the live Run Log.
+  const runLogRef = useRef<HTMLDivElement>(null);
 
   // ── results ──
   const [rows, setRows] = useState<BundleRow[]>([]);
@@ -427,6 +429,9 @@ export const TopBundleAnalysis: React.FC = () => {
     if (!mappingValid) { setError('Map the required columns first (Platform, Spend, Paid Impressions, and Bundle or Domain).'); return; }
     const myRun = ++runIdRef.current;
     setRunState('analyzing');
+    addLog('info', 'Analyze clicked — starting run…');
+    // Immediate visual feedback: jump to the live Run Log so it's obvious the click registered.
+    requestAnimationFrame(() => runLogRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }));
 
     const std = standardizeMapped(parsedRows, mapping);
     if (!std.length) {
@@ -595,19 +600,20 @@ export const TopBundleAnalysis: React.FC = () => {
   return (
     <div className="ap-shooter-scope">
       <div className="page-header">
-        <h1>Bundle Level Analysis</h1>
+        <h1>DoD Performance Change Analysis</h1>
         <p>Upload the daily Looker export (or auto-fetch from Slack) → analyze mobile in-app bundles by publisher, DSP, ad format &amp; size, country, region and POD → export an internal report and a clean, partner-shareable bundle list.</p>
       </div>
 
       {/* ── 1. import data ── */}
       <div className="glass-card animated-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
         <SectionHead title="Import data">
-          Load the daily Looker export — upload the file directly, or auto-fetch the latest one posted to Slack.
+          Load the daily Looker export in <b>one of two ways</b> — either upload the file yourself, or auto-fetch the latest one from Slack. You only need to do one.
         </SectionHead>
 
         <div className="import-grid">
           {/* Option A — manual upload */}
           <div className="import-tile">
+            <span className="import-tile-tag">Option A</span>
             <span className="import-tile-icon"><FileSpreadsheet size={18} /></span>
             <h3>Upload Looker export</h3>
             <p className="import-tile-desc">
@@ -620,14 +626,18 @@ export const TopBundleAnalysis: React.FC = () => {
             </label>
           </div>
 
+          {/* Either/or divider */}
+          <div className="import-or"><span>OR</span></div>
+
           {/* Option B — Slack auto-fetch */}
           <div className="import-tile">
+            <span className="import-tile-tag">Option B</span>
             <span className="import-tile-icon"><MessageSquare size={18} /></span>
             <h3>Auto-fetch from Slack</h3>
             <p className="import-tile-desc">
               Grabs the newest dated <b>TSV</b> Looker posted to the configured channel (<code>LOOKER_SLACK_CHANNEL</code> in <code>server/.env</code>) — files are named <code>bundle_performance_YYYYMMDD.tsv</code>; the same-name CSV is ignored. The bot needs <code>files:read</code> and must be in the channel. Missing prior days are auto-backfilled by date for day-over-day.
             </p>
-            <button className="btn btn-secondary" style={{ alignSelf: 'flex-start' }}
+            <button className="btn btn-primary" style={{ alignSelf: 'flex-start' }}
               onClick={handleFetchSlack} disabled={slackFetching}>
               {slackFetching ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
               {slackFetching ? 'Fetching…' : 'Fetch latest from Slack'}
@@ -646,11 +656,21 @@ export const TopBundleAnalysis: React.FC = () => {
                 <AlertTriangle size={15} /> This file is missing expected columns: {[...missingRequired.map((f) => FIELD_LABELS[f]), needsBundleOrDomain ? 'Bundle or Domain' : ''].filter(Boolean).join(', ')}. Check that it&apos;s the standard Looker export.
               </p>
             ) : (
-              <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
                 <button className="btn btn-primary" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }} onClick={handleAnalyze} disabled={!mappingValid || isAnalyzing}>
                   {isAnalyzing ? <Loader2 size={16} className="animate-spin" /> : <BarChart3 size={16} />}
                   {isAnalyzing ? 'Analyzing...' : 'Analyze'}
                 </button>
+                {isAnalyzing && (
+                  <span style={{ fontSize: 'var(--text-ui)', color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center', gap: '0.375rem' }}>
+                    <Loader2 size={14} className="animate-spin" /> Running — progress shows in the Run Log below.
+                  </span>
+                )}
+                {runState === 'done' && (
+                  <span style={{ fontSize: 'var(--text-ui)', color: 'var(--success)', display: 'inline-flex', alignItems: 'center', gap: '0.375rem' }}>
+                    <CheckCircle2 size={14} /> Analysis complete — see the results below.
+                  </span>
+                )}
               </div>
             )}
           </>
@@ -675,7 +695,7 @@ export const TopBundleAnalysis: React.FC = () => {
 
       {/* ── run log ── */}
       {logs.length > 0 && (
-        <div className="glass-card animated-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+        <div ref={runLogRef} className="glass-card animated-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
             <h2 style={{ fontSize: '1.05rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
               <Terminal size={18} /> Run Log ({logs.length})

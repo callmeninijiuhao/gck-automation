@@ -10,7 +10,7 @@ export const Input: React.FC<InputProps> = ({ label, error, icon, className, ...
   return (
     <div className="w-full">
       {label && (
-        <label className="block text-sm font-semibold text-pubmatic-navy mb-2">
+        <label className="block text-sm font-semibold text-gray-700 mb-2">
           {label}
         </label>
       )}
@@ -23,11 +23,11 @@ export const Input: React.FC<InputProps> = ({ label, error, icon, className, ...
         <input
           className={`
             w-full py-3 rounded-lg border bg-white transition-all duration-200 outline-none
-            text-pubmatic-text placeholder-gray-400
-            focus:border-pubmatic-blue focus:ring-2 focus:ring-pubmatic-blue/20
+            text-gray-900 placeholder-gray-400
+            focus:border-gray-400 focus:ring-2 focus:ring-slate-900/10
             disabled:bg-gray-100 disabled:text-gray-400
             ${icon ? 'pl-10 pr-4' : 'px-4'}
-            ${error ? 'border-red-500 focus:ring-red-200' : 'border-pubmatic-border'}
+            ${error ? 'border-red-500 focus:ring-red-200' : 'border-gray-200'}
             ${className}
           `}
           {...props}

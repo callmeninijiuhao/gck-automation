@@ -65,6 +65,8 @@ export const DISCREPANCY_CONFIG = {
   reportType: '1',
   /** 数据延迟：API 通常只能拉到 T-3 */
   dataLatencyDays: 3,
+  /** 单个 publisher 请求超时（ms）：防止某个请求挂死拖住整个 run */
+  fetchTimeoutMs: 90000,
   /** 告警/高亮阈值（0.05 = 5%） */
   alertThreshold: 0.05,
   highlightThreshold: 0.05,

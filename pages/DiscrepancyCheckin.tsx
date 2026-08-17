@@ -375,6 +375,11 @@ export const DiscrepancyCheckin: React.FC = () => {
       const highlightMsg = hl.length ? `🚨 ${hl.length} discrepancy${hl.length === 1 ? '' : 'ies'} found above threshold` : '✓ All clear — no major discrepancies';
       addLog('info', `Report ready: ${filtered.length} rows analyzed. ${highlightMsg}`);
       setRunState('done');
+
+      // Auto-run the advisory AI review so the user doesn't have to click again.
+      // Pass freshly-computed data (state updates are async and not yet visible here).
+      // Fire-and-forget: failures are self-contained and never affect the report.
+      void runAiReview({ rows: filtered, dspSummary, highlights: hl, fetchErrors: errors, reportDate });
     } catch (err) {
       const msg = (err as Error).message;
       const hint = diagnoseError(msg);
@@ -470,16 +475,21 @@ export const DiscrepancyCheckin: React.FC = () => {
   };
 
   /** Advisory AI review — runs AFTER the deterministic checks, never replaces them.
-      Reasons about plausibility/anomalies; failures don't affect the report. */
-  const handleAiReview = async () => {
+      Reasons about plausibility/anomalies; failures don't affect the report.
+      Takes explicit data so callers can pass freshly-computed values (state is async). */
+  const runAiReview = async (data: {
+    rows: DiscrepancyRow[];
+    dspSummary: ReturnType<typeof aggregateByDsp>;
+    highlights: DiscrepancyRow[];
+    fetchErrors: { publisherId: string; error: string }[];
+    reportDate: string;
+  }) => {
     setReviewState('running');
     setReviewError('');
     setReviewText('');
     addLog('info', `Running AI data review (advisory) via PubMatic Brain (${DEFAULT_LLM_CONFIG.model})...`);
     try {
-      const { text, candidates } = await generateDataReview({
-        rows, dspSummary, highlights, fetchErrors, reportDate, cfg: DEFAULT_LLM_CONFIG,
-      });
+      const { text, candidates } = await generateDataReview({ ...data, cfg: DEFAULT_LLM_CONFIG });
       if (!text) throw new Error('AI returned an empty review.');
       setReviewText(text);
       setReviewCandidates(candidates);
@@ -492,6 +502,9 @@ export const DiscrepancyCheckin: React.FC = () => {
       addLog('warn', `AI review unavailable (${msg.slice(0, 150)}) — deterministic checks are unaffected`);
     }
   };
+
+  /** Manual "Run AI Review" button — reuses the current results held in state. */
+  const handleAiReview = () => runAiReview({ rows, dspSummary, highlights, fetchErrors, reportDate });
 
   const isRunning = runState === 'fetching' || runState === 'analyzing';
   const canRun = !isRunning && pubtoken.trim() && bearerToken.trim() && publisherIds.length > 0;
@@ -506,7 +519,7 @@ export const DiscrepancyCheckin: React.FC = () => {
       {/* ── configuration ── */}
       <div className="grid-2">
         <div className="glass-card animated-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-          <h2 style={{ fontSize: '1.1rem', fontWeight: 600 }}>1. API Credentials & Date</h2>
+          <h2 style={{ fontSize: 'var(--text-h3)', fontWeight: 600 }}>1. API Credentials & Date</h2>
           <SecretInput label="Pubtoken" value={pubtoken} onChange={setPubtoken} placeholder="PUBMATIC_PUBTOKEN" required />
           <SecretInput label="Bearer Token" value={bearerToken} onChange={setBearerToken} placeholder="PUBMATIC_BEARER_TOKEN (generate in Token Management)" required />
           <SecretInput label="Cookie" value={cookie} onChange={setCookie} placeholder="Optional: session cookie" />
@@ -533,7 +546,7 @@ export const DiscrepancyCheckin: React.FC = () => {
 
         <div className="glass-card animated-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
-            <h2 style={{ fontSize: '1.1rem', fontWeight: 600 }}>2. Publisher List ({publisherIds.length})</h2>
+            <h2 style={{ fontSize: 'var(--text-h3)', fontWeight: 600 }}>2. Publisher List ({publisherIds.length})</h2>
             <label className="btn btn-secondary" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.375rem', cursor: 'pointer', padding: '0.35rem 0.75rem', fontSize: '0.75rem' }}>
               <Upload size={14} /> Bulk replace from Excel
               <input
@@ -559,7 +572,7 @@ export const DiscrepancyCheckin: React.FC = () => {
 
       {/* ── email recipients management ── */}
       <div className="glass-card animated-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-        <h2 style={{ fontSize: '1.1rem', fontWeight: 600 }}>3. Email Recipients ({recipients.length})</h2>
+        <h2 style={{ fontSize: 'var(--text-h3)', fontWeight: 600 }}>3. Email Recipients ({recipients.length})</h2>
         <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: 0 }}>
           Defaults to the gck-discrepancy-checkin recipient list. Add or remove as needed; changes are saved automatically.
         </p>
@@ -578,7 +591,7 @@ export const DiscrepancyCheckin: React.FC = () => {
       {isTauri() && !(sendConfig.emailEmbedded && sendConfig.slackEmbedded) && (
         <div className="glass-card animated-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
-            <h2 style={{ fontSize: '1.1rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <h2 style={{ fontSize: 'var(--text-h3)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
               <Settings size={18} /> 4. Sending Settings
               {(sendConfig.emailEmbedded || (sendSettings.emailUser && sendSettings.emailPassword))
                 ? <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'white', background: 'var(--success)', borderRadius: '999px', padding: '0.1rem 0.5rem' }}>{sendConfig.emailEmbedded ? 'Email: managed' : 'Email configured'}</span>

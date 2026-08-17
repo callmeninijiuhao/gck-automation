@@ -7,7 +7,7 @@ export default {
     theme: {
         extend: {
             fontFamily: {
-                sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', '"Segoe UI"', 'Roboto', 'sans-serif'],
+                sans: ['ui-rounded', '"SF Pro Rounded"', '"Nunito Sans"', '"Avenir Next"', 'system-ui', 'sans-serif'],
             },
             colors: {
                 pubmatic: {

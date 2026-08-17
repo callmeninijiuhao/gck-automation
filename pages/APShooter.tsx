@@ -320,7 +320,7 @@ export const APShooter: React.FC = () => {
             ) : isVerifying && !isFetching ? (
               <div className="glass-card animated-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
                 <div>
-                  <h2 style={{ fontSize: '1.25rem', fontWeight: 600 }}>
+                  <h2 style={{ fontSize: 'var(--text-h3)', fontWeight: 600 }}>
                     {verifyResult
                       ? (verifyResult.every(r => r.success) ? 'API Connection Verified' : 'API Verification Failed')
                       : 'Verifying API Connection...'}

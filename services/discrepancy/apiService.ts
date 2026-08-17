@@ -12,6 +12,22 @@ export const PROXY_BASE = `http://localhost:${PROXY_PORT}`;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** Reject a promise if it doesn't settle within `ms`. Used so a single hung request
+ *  (connection open, no response) can't stall the whole run — it throws, gets retried,
+ *  and ultimately fails as one publisher error instead of freezing at "Fetching N/M". */
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`Request timed out after ${ms / 1000}s — no response for ${label} (skipped so the run can finish)`)),
+      ms,
+    );
+    p.then(
+      (v) => { clearTimeout(timer); resolve(v); },
+      (e) => { clearTimeout(timer); reject(e); },
+    );
+  });
+}
+
 export type LogFn = (level: 'info' | 'warn' | 'error', message: string) => void;
 
 /** Translate a raw error message into a human-readable probable cause */
@@ -42,6 +58,12 @@ export function diagnoseError(message: string): string {
   }
   if (m.includes('timeout') || m.includes('timed out')) {
     return 'Request timed out — PubMatic API is slow or unreachable. Try again later.';
+  }
+  if (m.includes('unexpected socket close') || m.includes('esocket') || m.includes('econnclosed')) {
+    return 'SMTP connection dropped during TLS handshake — check VPN/firewall to smtp.office365.com:587. If it persists, Office365 SMTP AUTH (basic auth) may be disabled for this account.';
+  }
+  if (m.includes('535') || m.includes('authentication unsuccessful') || m.includes('5.7.139')) {
+    return 'SMTP authentication rejected — the sender email/password is wrong, or Office365 SMTP AUTH is disabled for this account (may require an app password or OAuth2).';
   }
   if (m.includes('json') && m.includes('parse')) {
     return 'Response could not be parsed — the API may have returned an HTML error page (often an auth/session issue).';
@@ -80,7 +102,8 @@ async function fetchOnce(
       Pubtoken: tokens.pubtoken,
     };
     if (tokens.cookie) headers['Cookie'] = tokens.cookie;
-    const res = await nativeFetch(targetUrl, { headers });
+    // JS can't cancel the Rust request, but withTimeout stops the worker from waiting forever.
+    const res = await withTimeout(nativeFetch(targetUrl, { headers }), DISCREPANCY_CONFIG.fetchTimeoutMs, `publisher ${publisherId}`);
     if (!res.ok) {
       const err = new Error(`HTTP ${res.status}: ${res.text.slice(0, 300)}`);
       (err as any).status = res.status || undefined;
@@ -98,12 +121,25 @@ async function fetchOnce(
     // Browsers cannot set the Cookie header directly; the proxy maps x-pm-cookie → Cookie
     if (tokens.cookie) headers['x-pm-cookie'] = tokens.cookie;
 
-    const resp = await fetch(proxied, { headers });
-    text = await resp.text();
-    if (!resp.ok) {
-      const err = new Error(`HTTP ${resp.status}: ${text.slice(0, 300)}`);
-      (err as any).status = resp.status;
-      throw err;
+    // AbortController actually cancels the socket on timeout (frees the connection),
+    // so one hung request can't stall the whole run.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), DISCREPANCY_CONFIG.fetchTimeoutMs);
+    try {
+      const resp = await fetch(proxied, { headers, signal: controller.signal });
+      text = await resp.text();
+      if (!resp.ok) {
+        const err = new Error(`HTTP ${resp.status}: ${text.slice(0, 300)}`);
+        (err as any).status = resp.status;
+        throw err;
+      }
+    } catch (e) {
+      if ((e as any)?.name === 'AbortError' || controller.signal.aborted) {
+        throw new Error(`Request timed out after ${DISCREPANCY_CONFIG.fetchTimeoutMs / 1000}s — no response for publisher ${publisherId} (skipped so the run can finish)`);
+      }
+      throw e;
+    } finally {
+      clearTimeout(timer);
     }
   }
 
@@ -151,6 +187,7 @@ export function parseCsvWithRepair(
   let repairedSplit = 0;
   let repairedOverflow = 0;
   let droppedFragments = 0;
+  let benignFragments = 0; // blank / single-cell trailing artifacts (report footer) — not data loss
 
   let i = 1;
   while (i < lines.length) {
@@ -183,7 +220,10 @@ export function parseCsvWithRepair(
       repairedOverflow += 1;
       records.push(cur);
     } else {
-      droppedFragments += 1;
+      // A fragment with 0–1 non-empty cells is a trailing footer/blank line, not a lost row.
+      const nonEmpty = cur.filter((c) => String(c ?? '').trim() !== '').length;
+      if (nonEmpty <= 1) benignFragments += 1;
+      else droppedFragments += 1;
     }
     i += 1;
   }

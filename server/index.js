@@ -174,11 +174,17 @@ app.post('/api/send-email', async (req, res) => {
         .filter(Boolean);
 
     try {
+        const port = parseInt(process.env.SMTP_PORT || '587', 10);
         const transporter = nodemailer.createTransport({
             host: process.env.SMTP_HOST || 'smtp.office365.com',
-            port: parseInt(process.env.SMTP_PORT || '587', 10),
-            secure: false, // STARTTLS
+            port,
+            secure: port === 465, // 465 = implicit TLS; 587 = STARTTLS
+            requireTLS: true,      // enforce STARTTLS upgrade on 587 (Office365 drops the socket otherwise)
             auth: { user, pass },
+            tls: { minVersion: 'TLSv1.2' }, // Office365 rejects older TLS mid-handshake → "Unexpected socket close"
+            connectionTimeout: 20000,
+            greetingTimeout: 20000,
+            socketTimeout: 30000,
         });
         await transporter.sendMail({
             from: user,
@@ -261,6 +267,7 @@ app.post('/api/llm', async (req, res) => {
             method: 'POST',
             headers,
             body: JSON.stringify(payload),
+            signal: AbortSignal.timeout(120000), // don't hold the connection if Brain hangs
         });
         const text = await upstream.text();
         if (!upstream.ok) {

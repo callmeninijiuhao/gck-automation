@@ -145,12 +145,12 @@ Many thanks`;
   };
 
   return (
-    <div className="space-y-8">
+    <div className="ap-shooter-scope">
       {/* Header Section */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div>
-          <h1 className="text-3xl font-bold text-pubmatic-navy tracking-tight">Onboarding Validator</h1>
-          <p className="text-gray-500 mt-2">Validate publisher apps for ads.txt compliance and metadata integrity.</p>
+        <div className="page-header">
+          <h1>Onboarding Validator</h1>
+          <p>Validate publisher apps for ads.txt compliance and metadata integrity.</p>
         </div>
         <div className="flex items-center space-x-2 text-sm text-gray-400 bg-white px-3 py-1.5 rounded-full border border-gray-200 shadow-sm">
             <Info size={14} />
@@ -159,13 +159,12 @@ Many thanks`;
       </div>
 
       {/* Info Card */}
-      <div className="bg-white rounded-xl shadow-card border border-pubmatic-border overflow-hidden">
-        <div className="p-1 bg-gradient-to-r from-pubmatic-blue via-pubmatic-teal to-pubmatic-blue opacity-80 h-1"></div>
+      <div className="bg-white rounded-xl shadow-card border border-gray-200 overflow-hidden">
         <div className="p-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
-              <h3 className="text-sm font-bold text-pubmatic-navy mb-3 flex items-center gap-2">
-                <Target size={16} className="text-pubmatic-teal" />
+              <h3 className="text-sm font-bold text-gray-900 mb-3 flex items-center gap-2">
+                <Target size={16} className="text-blue-600" />
                 Purpose
               </h3>
               <p className="text-sm text-gray-600 leading-relaxed">
@@ -173,8 +172,8 @@ Many thanks`;
               </p>
             </div>
             <div>
-              <h3 className="text-sm font-bold text-pubmatic-navy mb-3 flex items-center gap-2">
-                <ListOrdered size={16} className="text-pubmatic-teal" />
+              <h3 className="text-sm font-bold text-gray-900 mb-3 flex items-center gap-2">
+                <ListOrdered size={16} className="text-blue-600" />
                 How to Use
               </h3>
               <ol className="text-sm text-gray-600 leading-relaxed space-y-2 list-decimal list-inside">
@@ -190,8 +189,7 @@ Many thanks`;
       </div>
 
       {/* Input Card */}
-      <div className="bg-white rounded-xl shadow-card border border-pubmatic-border overflow-hidden">
-        <div className="p-1 bg-gradient-to-r from-pubmatic-blue via-pubmatic-teal to-pubmatic-blue opacity-80 h-1"></div>
+      <div className="bg-white rounded-xl shadow-card border border-gray-200 overflow-hidden">
         <div className="p-8">
           <div className="grid grid-cols-1 md:grid-cols-[1fr_300px] gap-6">
             {/* Left: Input Form */}
@@ -226,12 +224,12 @@ Many thanks`;
               {/* Progress Indicator */}
               {(loadingState === 'analyzing_input' || loadingState === 'crawling_dev_page' || loadingState === 'validating_ads_txt') && (
                 <div className="space-y-2">
-                  <div className="flex justify-between text-xs font-semibold text-pubmatic-navy uppercase tracking-wide">
+                  <div className="flex justify-between text-xs font-semibold text-gray-900 uppercase tracking-wide">
                     <span>Gathering Live Data...</span>
                     <span className="animate-pulse">Processing</span>
                   </div>
                   <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
-                    <div className="bg-pubmatic-blue h-2 rounded-full w-2/3 animate-[shimmer_1.5s_infinite] bg-gradient-to-r from-pubmatic-blue via-pubmatic-teal to-pubmatic-blue bg-[length:200%_100%]"></div>
+                    <div className="bg-blue-600 h-2 rounded-full w-2/3 animate-[shimmer_1.5s_infinite] bg-gradient-to-r from-blue-600 via-blue-600 to-blue-600 bg-[length:200%_100%]"></div>
                   </div>
                   <p className="text-xs text-gray-500 text-center mt-2">
                     Scanning developer profile, extracting address, and validating ads.txt for all apps...
@@ -249,25 +247,25 @@ Many thanks`;
 
             {/* Right: Supported Formats */}
             <div className="bg-gray-50 rounded-lg border border-gray-100 p-5 space-y-4">
-              <h4 className="text-sm font-bold text-pubmatic-navy flex items-center gap-2">
-                <Smartphone size={14} className="text-pubmatic-teal" />
+              <h4 className="text-sm font-bold text-gray-900 flex items-center gap-2">
+                <Smartphone size={14} className="text-blue-600" />
                 Supported Formats
               </h4>
               <ul className="space-y-2 text-sm text-gray-600">
                 <li className="flex items-start gap-2">
-                  <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-pubmatic-teal shrink-0"></span>
+                  <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-blue-600 shrink-0"></span>
                   <span><strong>Google Play URL</strong> — full store link</span>
                 </li>
                 <li className="flex items-start gap-2">
-                  <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-pubmatic-teal shrink-0"></span>
+                  <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-blue-600 shrink-0"></span>
                   <span><strong>Bundle ID</strong> — e.g. <code className="bg-white px-1 py-0.5 rounded text-xs border border-gray-200">com.example.app</code></span>
                 </li>
                 <li className="flex items-start gap-2">
-                  <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-pubmatic-teal shrink-0"></span>
+                  <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-blue-600 shrink-0"></span>
                   <span><strong>iOS App ID</strong> — numeric or <code className="bg-white px-1 py-0.5 rounded text-xs border border-gray-200">id123456789</code></span>
                 </li>
                 <li className="flex items-start gap-2">
-                  <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-pubmatic-teal shrink-0"></span>
+                  <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-blue-600 shrink-0"></span>
                   <span><strong>App Store URL</strong> — full iTunes link</span>
                 </li>
               </ul>
@@ -281,19 +279,19 @@ Many thanks`;
         <div className="space-y-6 animate-fade-in-up">
           
           {/* Developer Info Card */}
-          <div className="bg-white rounded-xl shadow-card border border-pubmatic-border p-6">
+          <div className="bg-white rounded-xl shadow-card border border-gray-200 p-6">
               <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
                 <div className="flex items-center gap-4">
-                    <div className="w-16 h-16 bg-pubmatic-lightBlue rounded-full flex items-center justify-center text-pubmatic-blue border border-blue-100 shrink-0">
+                    <div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center text-blue-600 border border-blue-100 shrink-0">
                         <Globe size={32} />
                     </div>
                     <div>
-                        <h2 className="text-xl font-bold text-pubmatic-navy">{result.developer.name}</h2>
+                        <h2 className="text-xl font-bold text-gray-900">{result.developer.name}</h2>
                         <a 
                             href={result.developer.url} 
                             target="_blank" 
                             rel="noreferrer"
-                            className="text-pubmatic-blue hover:text-pubmatic-navy text-sm flex items-center mt-1 transition-colors"
+                            className="text-blue-600 hover:text-gray-900 text-sm flex items-center mt-1 transition-colors"
                         >
                             View Developer Page <ExternalLink size={12} className="ml-1" />
                         </a>
@@ -308,15 +306,15 @@ Many thanks`;
                 <div className="flex gap-8 w-full md:w-auto border-t md:border-t-0 border-gray-100 pt-4 md:pt-0">
                     <div className="text-center px-6 py-2 border-r border-gray-100 last:border-0 flex-1 md:flex-none">
                         <p className="text-xs text-gray-400 uppercase tracking-widest font-semibold mb-1">Platform</p>
-                        <div className="flex items-center justify-center text-pubmatic-navy font-bold">
-                            <Smartphone size={16} className="mr-2 text-pubmatic-teal" />
+                        <div className="flex items-center justify-center text-gray-900 font-bold">
+                            <Smartphone size={16} className="mr-2 text-blue-600" />
                             {result.developer.platform}
                         </div>
                     </div>
                     <div className="text-center px-6 py-2 flex-1 md:flex-none">
                         <p className="text-xs text-gray-400 uppercase tracking-widest font-semibold mb-1">Total Apps</p>
-                        <div className="flex items-center justify-center text-pubmatic-navy font-bold">
-                            <Layers size={16} className="mr-2 text-pubmatic-teal" />
+                        <div className="flex items-center justify-center text-gray-900 font-bold">
+                            <Layers size={16} className="mr-2 text-blue-600" />
                             {result.apps.length}
                         </div>
                     </div>
@@ -325,9 +323,9 @@ Many thanks`;
           </div>
 
           {/* Apps Table Card */}
-          <div className="bg-white rounded-xl shadow-card border border-pubmatic-border overflow-hidden">
+          <div className="bg-white rounded-xl shadow-card border border-gray-200 overflow-hidden">
             <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
-                <h3 className="font-bold text-pubmatic-navy">Discovered Applications</h3>
+                <h3 className="font-bold text-gray-900">Discovered Applications</h3>
                 <div className="flex items-center gap-3">
                   <span className="text-xs font-medium text-gray-500 bg-white px-2 py-1 rounded border border-gray-200">
                       {result.apps.length} Results
@@ -344,7 +342,7 @@ Many thanks`;
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse">
                 <thead>
-                  <tr className="bg-pubmatic-lightBlue text-pubmatic-navy text-xs uppercase tracking-wider font-bold">
+                  <tr className="bg-slate-900 text-white text-xs uppercase tracking-wider font-bold">
                     <th className="px-6 py-4 rounded-tl-lg">App Name</th>
                     <th className="px-6 py-4">Store URL</th>
                     <th className="px-6 py-4">Developer Website</th>
@@ -367,7 +365,7 @@ Many thanks`;
                                 href={app.storeUrl} 
                                 target="_blank" 
                                 rel="noreferrer" 
-                                className="hover:text-pubmatic-blue flex items-center break-all"
+                                className="hover:text-blue-600 flex items-center break-all"
                             >
                                 {app.storeUrl} <ExternalLink size={10} className="ml-1 shrink-0" />
                             </a>
@@ -379,7 +377,7 @@ Many thanks`;
                                 href={app.developerWebsite} 
                                 target="_blank" 
                                 rel="noreferrer"
-                                className="hover:text-pubmatic-blue hover:underline truncate max-w-[200px] block"
+                                className="hover:text-blue-600 hover:underline truncate max-w-[200px] block"
                             >
                                 {app.developerWebsite}
                             </a>
@@ -393,7 +391,7 @@ Many thanks`;
                                 href={app.adsTxtUrl} 
                                 target="_blank" 
                                 rel="noreferrer" 
-                                className="hover:text-pubmatic-blue hover:underline bg-gray-100 px-2 py-1 rounded truncate max-w-[250px] block" 
+                                className="hover:text-blue-600 hover:underline bg-gray-100 px-2 py-1 rounded truncate max-w-[250px] block" 
                                 title={app.adsTxtUrl}
                              >
                                 {app.adsTxtUrl}
@@ -418,11 +416,11 @@ Many thanks`;
           </div>
 
           {/* Email Generator Module */}
-          <div className="bg-white rounded-xl shadow-card border border-pubmatic-border overflow-hidden">
+          <div className="bg-white rounded-xl shadow-card border border-gray-200 overflow-hidden">
              <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
                 <div className="flex items-center gap-2">
-                    <Mail size={18} className="text-pubmatic-blue" />
-                    <h3 className="font-bold text-pubmatic-navy">Outreach Email Generator</h3>
+                    <Mail size={18} className="text-blue-600" />
+                    <h3 className="font-bold text-gray-900">Outreach Email Generator</h3>
                 </div>
                 <Button 
                     variant="secondary" 
@@ -447,7 +445,7 @@ Many thanks`;
                         <select 
                             value={variables.sdkName}
                             onChange={(e) => handleVariableChange('sdkName', e.target.value)}
-                            className="w-full text-sm p-2 border border-gray-300 rounded focus:border-pubmatic-blue outline-none bg-white"
+                            className="w-full text-sm p-2 border border-gray-300 rounded focus:border-blue-600 outline-none bg-white"
                         >
                             <option value="OpenWrap SDK">OpenWrap SDK</option>
                             <option value="Prebid">Prebid</option>
@@ -461,7 +459,7 @@ Many thanks`;
                         <select 
                             value={variables.mediationPartner}
                             onChange={(e) => handleVariableChange('mediationPartner', e.target.value)}
-                            className="w-full text-sm p-2 border border-gray-300 rounded focus:border-pubmatic-blue outline-none bg-white"
+                            className="w-full text-sm p-2 border border-gray-300 rounded focus:border-blue-600 outline-none bg-white"
                         >
                             <option value="MAX mediation">MAX mediation</option>
                             <option value="LevelPlay Mediation">LevelPlay Mediation</option>
@@ -477,7 +475,7 @@ Many thanks`;
                             type="text" 
                             value={variables.developerAccountUrl}
                             onChange={(e) => handleVariableChange('developerAccountUrl', e.target.value)}
-                            className="w-full text-xs p-2 border border-gray-300 rounded bg-white text-gray-500 focus:border-pubmatic-blue outline-none"
+                            className="w-full text-xs p-2 border border-gray-300 rounded bg-white text-gray-500 focus:border-blue-600 outline-none"
                          />
                     </div>
                     <div>
@@ -486,7 +484,7 @@ Many thanks`;
                             value={variables.adsTxtUrlString}
                             onChange={(e) => handleVariableChange('adsTxtUrlString', e.target.value)}
                             rows={2}
-                            className="w-full text-xs p-2 border border-gray-300 rounded bg-white text-gray-500 focus:border-pubmatic-blue outline-none resize-none"
+                            className="w-full text-xs p-2 border border-gray-300 rounded bg-white text-gray-500 focus:border-blue-600 outline-none resize-none"
                          />
                     </div>
                     <div>
@@ -495,7 +493,7 @@ Many thanks`;
                             value={variables.bundleList}
                             onChange={(e) => handleVariableChange('bundleList', e.target.value)}
                             rows={6}
-                            className="w-full text-xs p-2 border border-gray-300 rounded bg-white text-gray-500 focus:border-pubmatic-blue outline-none font-mono"
+                            className="w-full text-xs p-2 border border-gray-300 rounded bg-white text-gray-500 focus:border-blue-600 outline-none font-mono"
                          />
                     </div>
                 </div>
@@ -509,7 +507,7 @@ Many thanks`;
                         </span>
                     </div>
                     <textarea 
-                        className="w-full h-[500px] p-4 rounded-lg border border-gray-200 font-mono text-sm text-gray-700 focus:border-pubmatic-blue focus:ring-2 focus:ring-pubmatic-blue/20 outline-none resize-none bg-white"
+                        className="w-full h-[500px] p-4 rounded-lg border border-gray-200 font-mono text-sm text-gray-700 focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20 outline-none resize-none bg-white"
                         value={emailDraft}
                         onChange={(e) => setEmailDraft(e.target.value)}
                     />

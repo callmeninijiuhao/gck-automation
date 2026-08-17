@@ -185,7 +185,7 @@ export const TokenManager: React.FC = () => {
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
             <Key style={{ color: 'var(--primary)' }} size={24} />
             <div>
-              <h2 style={{ fontSize: '1.25rem', fontWeight: 600 }}>Generate Access Token</h2>
+              <h2 style={{ fontSize: 'var(--text-h3)', fontWeight: 600 }}>Generate Access Token</h2>
               <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
                 First-time token generation for new API users.
               </p>
@@ -280,7 +280,7 @@ export const TokenManager: React.FC = () => {
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
             <Shield style={{ color: 'var(--primary)' }} size={24} />
             <div>
-              <h2 style={{ fontSize: '1.25rem', fontWeight: 600 }}>Refresh Access Token</h2>
+              <h2 style={{ fontSize: 'var(--text-h3)', fontWeight: 600 }}>Refresh Access Token</h2>
               <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
                 Refresh an existing token before the 60-day expiration.
               </p>
