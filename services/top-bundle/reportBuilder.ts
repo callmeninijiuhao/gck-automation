@@ -96,7 +96,7 @@ function insightsHtml(text: string): string {
     const core = b ? b[1] : line;   // a heading may arrive wrapped as a bullet ("• Executive Summary")
     if (isHeading(core)) {
       closeList();
-      html += `<p style="margin:${i === 0 ? '0' : '14px'} 0 6px;font-size:12px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;color:#1976d2">${esc(core.replace(/:$/, ''))}</p>`;
+      html += `<p style="margin:${i === 0 ? '0' : '14px'} 0 6px;font-size:11pt;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;color:#1976d2">${esc(core.replace(/:$/, ''))}</p>`;
       return;
     }
     if (b) {
@@ -113,7 +113,7 @@ function insightsHtml(text: string): string {
     html += `<p style="margin:6px 0;line-height:1.6">${renderInline(line)}</p>`;
   });
   closeList();
-  return `<div style="background:#f5f7fa;padding:14px 18px;border-left:4px solid #1976d2;border-radius:0 6px 6px 0;font-size:13px;color:#333">${html}</div>`;
+  return `<div style="background:#f5f7fa;padding:14px 18px;border-left:4px solid #1976d2;border-radius:0 6px 6px 0;font-size:12pt;color:#333">${html}</div>`;
 }
 
 /** Coloured PMR up/down/new arrow for a day-over-day change (email cell).

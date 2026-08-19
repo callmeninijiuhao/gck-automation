@@ -207,7 +207,7 @@ export function generateStructuredSummary(rows: DiscrepancyRow[], dateLabel: str
     lines.push(`• ${r.dsp} — Spend Discrepancy ${fmtPct(r.spendDiscrepancyPct)} (PM $${fmtNum(r.pubmaticSpend)} vs DSP $${fmtNum(r.dspSpend)})`);
   }
   lines.push('', 'Top 20 Spenders by DSP Partner Spend:');
-  for (const r of topSpenders.slice(0, 5)) {
+  for (const r of topSpenders.slice(0, 10)) {
     const name = r.publisherName ? ` (${r.publisherName})` : '';
     lines.push(`• Publisher ${r.publisherId}${name} / ${r.dsp} — DSP Spend $${fmtNum(r.dspSpend)} — Spend Discrepancy ${fmtPct(r.spendDiscrepancyPct)}`);
   }

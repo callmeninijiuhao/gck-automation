@@ -66,7 +66,29 @@ const ALIASES: Record<CanonicalField, string[]> = {
 const norm = (s: string): string =>
   String(s ?? '').toLowerCase().replace(/\(.*?\)/g, '').replace(/[_\-]+/g, ' ').replace(/\s+/g, ' ').trim();
 
-export interface ParsedFile { headers: string[]; rows: Record<string, unknown>[]; }
+/** Compact roll-up of papaparse's per-row errors (mismatched column counts, quote
+    problems, etc.). Surfacing this is what turns a silent row-collapse into a visible
+    warning — the stray-quote bug dropped 967k rows to 1.9k precisely because these
+    errors were discarded. `undefined` means the parse was clean. */
+export interface ParseIssues {
+  count: number;                    // total row-level errors papaparse reported
+  byType: Record<string, number>;   // e.g. { InvalidQuotes: 15, TooFewFields: 2 }
+  firstRow?: number;                // 0-based data row of the first error
+  sample: string[];                 // first few human-readable messages
+}
+
+export interface ParsedFile { headers: string[]; rows: Record<string, unknown>[]; issues?: ParseIssues; }
+
+type RawParseError = { type?: string; code?: string; message: string; row?: number };
+
+function summarizeParseErrors(errors: RawParseError[] | undefined): ParseIssues | undefined {
+  if (!errors || !errors.length) return undefined;
+  const byType: Record<string, number> = {};
+  for (const e of errors) { const k = e.code || e.type || 'error'; byType[k] = (byType[k] || 0) + 1; }
+  const sample = errors.slice(0, 3).map((e) =>
+    `${e.code || e.type || 'error'}${e.row != null ? ` @row ${e.row}` : ''}: ${e.message}`);
+  return { count: errors.length, byType, firstRow: errors[0].row, sample };
+}
 
 /** Decide the delimiter for a delimited-text file.
     The newer Looker Slack schedule delivers TSV (higher row cap than CSV), so we
@@ -85,11 +107,18 @@ function detectDelimiter(text: string, filename?: string): string {
 /** Parse raw CSV/TSV text (used by both file upload and Slack auto-fetch).
     Pass `filename` when known so the delimiter is picked from the extension. */
 export function parseCsvText(text: string, filename?: string): ParsedFile {
+  const delimiter = detectDelimiter(text, filename);
   const parsed = Papa.parse<Record<string, unknown>>(text.trim(), {
-    header: true, skipEmptyLines: true, delimiter: detectDelimiter(text, filename),
+    header: true, skipEmptyLines: true, delimiter,
+    // Looker's TSV is NOT quote-escaped, yet app names occasionally contain a stray
+    // double-quote. With papaparse's default quoteChar ("), that single quote makes it
+    // swallow the entire rest of the file into one "quoted" field — collapsing ~967k
+    // rows down to ~1.9k with InvalidQuotes errors. Neutralise quote parsing for TSV
+    // (NUL never appears in the data); keep RFC-4180 quote handling for real CSVs.
+    quoteChar: delimiter === '\t' ? '\u0000' : '"',
   });
   const headers = parsed.meta.fields ?? (parsed.data[0] ? Object.keys(parsed.data[0]) : []);
-  return { headers, rows: parsed.data };
+  return { headers, rows: parsed.data, issues: summarizeParseErrors(parsed.errors) };
 }
 
 export async function parseFile(file: File): Promise<ParsedFile> {

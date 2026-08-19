@@ -99,6 +99,10 @@ const pickBefore = (files: SlackFile[], before: string) =>
 // ── standardize a fetched TSV into BundleRow[] ──
 function standardize(text: string, filename: string): BundleRow[] {
   const parsed = parseCsvText(text, filename);
+  if (parsed.issues) {
+    const bt = Object.entries(parsed.issues.byType).map(([k, v]) => `${v}× ${k}`).join(', ');
+    console.warn(`[parse] ${filename}: ${parsed.issues.count} row issue(s) [${bt}]${parsed.issues.firstRow != null ? `, first at data row ${parsed.issues.firstRow}` : ''} — rows may be dropped/misaligned.`);
+  }
   return standardizeMapped(parsed.rows, autoMap(parsed.headers));
 }
 

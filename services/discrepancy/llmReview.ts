@@ -141,19 +141,21 @@ export function buildReviewPrompt(params: {
 
   const system =
     'You are a senior programmatic QA analyst reviewing a daily DSP Discrepancy report for the GCK team '
-    + '(a mobile in-app POD). Discrepancy = (PubMatic reported spend/impressions) vs (the DSP partner\'s reported numbers). '
+    + '(a mobile in-app POD). Discrepancy = PubMatic-reported spend/impressions vs the DSP partner\'s reported numbers. '
     + 'CRITICAL: every number below was pre-computed by a deterministic, already-validated pipeline and is CORRECT. '
-    + 'Do NOT recompute, re-sum, or recalculate anything, and do NOT introduce any number that is not shown to you. '
-    + 'Your job is a PLAUSIBILITY / DATA-QUALITY review — like an experienced analyst eyeballing the report for things '
-    + 'worth a human\'s attention that the fixed ±5% threshold might miss. '
-    + 'Weigh common benign explanations before alarming: reporting lag, timezone cutoffs (PubMatic PST vs DSP UTC), '
-    + 'rounding on tiny volumes, and partial-day data. A one-sided ~0 usually means a reporting/mapping gap, not lost money. '
-    + 'Output EXACTLY these three sections, plain professional prose, no emoji, no decorative symbols:\n'
-    + '1. DATA HEALTH: exactly one of [Looks healthy | Minor concerns | Needs review], then one sentence of justification.\n'
-    + '2. ANOMALIES TO CHECK: a short bullet list; each bullet names the entity, states what is odd citing ONE supporting '
-    + 'number from the data, and gives the single most likely cause. If nothing is genuinely notable, say so plainly.\n'
-    + '3. SUGGESTED FOLLOW-UPS: a few concrete, actionable bullets (what/who to verify). '
-    + 'Be concise and do not manufacture concerns when the data looks fine.';
+    + 'Do NOT recompute, re-sum, or introduce any number not shown to you. '
+    + 'This is a PLAUSIBILITY / DATA-QUALITY read (not an audit) — surface only what a human should actually look at, beyond the fixed ±5% threshold. '
+    + 'Weigh benign explanations before alarming: reporting lag, timezone cutoffs (PubMatic PST vs DSP UTC), rounding on tiny volumes, partial-day data. '
+    + 'A one-sided ~0 usually means a reporting/mapping gap, not lost money. '
+    + 'Be terse — a scan-in-10-seconds briefing, not a memo. No preamble, no emoji, no decorative symbols, no markdown. '
+    + 'Output EXACTLY these three sections. Put each HEADING on its own line in ALL CAPS with no number and no colon; its content goes below it:\n'
+    + 'DATA HEALTH\n'
+    + 'One line — one of [Looks healthy | Minor concerns | Needs review] plus a short justifying clause.\n'
+    + 'ANOMALIES TO CHECK\n'
+    + 'Up to 3 one-line bullets, most material first, each formatted "- Entity — what is odd (cite ONE number) — most likely cause". If nothing is genuinely notable, a single bullet saying so.\n'
+    + 'SUGGESTED FOLLOW-UPS\n'
+    + 'Up to 3 short action bullets (what/who to verify). Drop any bullet you cannot make specific.\n'
+    + 'Keep the entire review under ~110 words.';
 
   const user = [
     `Report date: ${reportDate}`,

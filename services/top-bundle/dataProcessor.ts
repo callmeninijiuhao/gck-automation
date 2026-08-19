@@ -279,11 +279,13 @@ export const byAdFormat = (rows: BundleRow[], n = 30) =>
 export const byCountry = (rows: BundleRow[], n = 30) =>
   aggregate(inApp(rows), ['country']).slice(0, n);
 
+// Drop rows whose Region/POD is blank in the Looker export (unclassified tail,
+// negligible spend). Filter before slicing so the Top-N counts real PODs.
 export const byRegion = (rows: BundleRow[]) =>
-  aggregate(inApp(rows), ['region']);
+  aggregate(inApp(rows), ['region']).filter((r) => String(r.region ?? '').trim() !== '');
 
 export const byPod = (rows: BundleRow[], n = 30) =>
-  aggregate(inApp(rows), ['pod', 'region']).slice(0, n);
+  aggregate(inApp(rows), ['pod', 'region']).filter((r) => String(r.pod ?? '').trim() !== '').slice(0, n);
 
 export const topDomains = (rows: BundleRow[], n: number = TOP_BUNDLE_CONFIG.topDomains) =>
   aggregate(webMweb(rows), ['domain', 'platform', 'publisher']).slice(0, n);

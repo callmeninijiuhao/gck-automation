@@ -64,8 +64,7 @@ export function buildEmailHtml(
   dateLabel: string,
   dspSummary: DspSummaryRow[],
   topSpenders: DiscrepancyRow[],
-  highlights: DiscrepancyRow[],
-  aiReview?: string
+  highlights: DiscrepancyRow[]
 ): string {
   const highlightSection = highlights.length
     ? tableHtml(highlights, DETAIL_COLS, true)
@@ -74,19 +73,6 @@ export function buildEmailHtml(
   const publishers = new Set(rows.map((r) => r.publisherId)).size;
   const dsps = new Set(rows.map((r) => r.dsp)).size;
   const now = new Date().toISOString().slice(0, 16).replace('T', ' ');
-
-  // Lead with the AI review so colleagues see the plain-language read at a glance.
-  // Advisory: numeric accuracy is verified deterministically; this is a plausibility pass.
-  const aiReviewSection = aiReview && aiReview.trim()
-    ? `
-    <div style="background:#faf5ff;padding:16px 18px;border:1px solid #e9d5ff;border-left:5px solid #7c3aed;border-radius:6px;margin:0 0 8px">
-      <p style="margin:0 0 8px;font-size:12px;font-weight:700;letter-spacing:0.03em;text-transform:uppercase;color:#7c3aed">
-        🤖 AI Data Review <span style="font-weight:600;color:#9333ea">· advisory</span>
-      </p>
-      <p style="margin:0;font-size:13px;line-height:1.7;white-space:pre-line;color:#333">${esc(aiReview.trim()).replace(/\n/g, '<br>')}</p>
-      <p style="margin:10px 0 0;font-size:11px;color:#a78bda">A plausibility read by an AI analyst — a second pair of eyes, not a source of truth. The numbers below are the verified figures.</p>
-    </div>`
-    : '';
 
   return `
     <html>
@@ -100,8 +86,7 @@ export function buildEmailHtml(
         <b>Highlight threshold:</b> ±${th.toFixed(0)}% Spend or Impressions Discrepancy
     </p>
     <hr>
-    ${aiReviewSection}
-    <h3>Structured Summary</h3>
+    <h3>Executive Summary</h3>
     <p style="background:#f5f5f5;padding:14px;border-left:4px solid #1976d2;font-size:13px;line-height:1.7;white-space:pre-line">${esc(summaryText).replace(/\n/g, '<br>')}</p>
 
     <h3>📊 Section 1 — Overall DSP Summary (All Publishers Combined)</h3>
