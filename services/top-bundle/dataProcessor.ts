@@ -75,7 +75,13 @@ export function standardizeMapped(raw: Record<string, unknown>[], mapping: Field
     return h ? rec[h] : undefined;
   };
   const out: BundleRow[] = [];
+  const bundleHeader = String(mapping.bundle ?? '').trim().toLowerCase();
   for (const rec of raw) {
+    // Skip Looker's trailing footer / repeated-header line: its bundle cell literally
+    // echoes the column header (e.g. "domain" under the "domain" column, with a "dt"
+    // date and blank metrics). No real bundle equals its own header name, so this is a
+    // strict no-op for files that have no such footer row.
+    if (bundleHeader && String(get(rec, 'bundle') ?? '').trim().toLowerCase() === bundleHeader) continue;
     const platform = cleanStr(get(rec, 'platform')) ?? '';
     if (!platform) continue;
     const bundle = cleanStr(get(rec, 'bundle'));
