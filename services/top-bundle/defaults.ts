@@ -4,7 +4,8 @@
 // ("Reset" restores this list).
 // ─────────────────────────────────────────────
 
-/** Where the internal analysis email goes (reuses the validated Discrepancy email path). */
-export const DEFAULT_EMAIL_RECIPIENTS: string[] = [
-  'sammi.wang@pubmatic.com',
-];
+// Same recipients as the Discrepancy Check-in tool (single source of truth) — the
+// internal DoD Performance report reuses that tool's validated email path, so the two
+// default lists stay identical. Re-exported so the page and the headless daily-brief
+// job both use it.
+export { DEFAULT_EMAIL_RECIPIENTS } from '../discrepancy/defaults';
