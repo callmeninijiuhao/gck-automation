@@ -13,7 +13,7 @@ import { AggRow } from './types';
 // v2: bumped after the toNum scientific-notation fix so any pre-fix (inflated) snapshots
 // are ignored rather than mixed into a day-over-day comparison. Bump again on any future
 // parsing/aggregation change so stale caches auto-invalidate.
-const KEY = 'top_bundle_history_v2';
+const KEY = 'top_bundle_history_v3';
 const KEEP_ROWS = 200;   // store beyond top-50 so entries/exits near the cutoff are caught
 const KEEP_DAYS = 60;
 
@@ -105,8 +105,8 @@ export function changeArrow(c: BundleChange | undefined): string {
 // ─────────────────────────────────────────────
 export type PubScope = 'all' | 'gck';
 const PUB_KEYS: Record<PubScope, string> = {
-  all: 'top_bundle_pub_history_v2',
-  gck: 'top_bundle_gckpub_history_v2',
+  all: 'top_bundle_pub_history_v3',
+  gck: 'top_bundle_gckpub_history_v3',
 };
 const KEEP_PUBS = 100;
 
@@ -208,7 +208,7 @@ export interface DimDayOverDay { prevDate: string; topN: number; rows: DimChange
 
 interface DimSnap { name: string; spend: number; pmr: number; }
 type DimStore = Record<string, DimSnap[]>;
-const dimKey = (dim: string) => `top_bundle_dim_${dim}_v2`;
+const dimKey = (dim: string) => `top_bundle_dim_${dim}_v3`;
 
 function loadDim(dim: string): DimStore {
   try { return JSON.parse(localStorage.getItem(dimKey(dim)) || '{}'); } catch { return {}; }
@@ -258,7 +258,7 @@ export function dimChangeOf(dod: DimDayOverDay | null, name: string): DimChange 
 // executive summary can state an EXACT overall day-over-day % (the top-N dimension
 // snapshots only cover the top rows, which would understate the true total).
 // ─────────────────────────────────────────────
-const TOTALS_KEY = 'top_bundle_totals_v2';
+const TOTALS_KEY = 'top_bundle_totals_v3';
 export interface DailyTotals { inAppSpend: number; pmr: number; revenue: number; }
 
 export function saveDailyTotals(date: string, t: DailyTotals): void {

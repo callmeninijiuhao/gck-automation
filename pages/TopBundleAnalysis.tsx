@@ -379,28 +379,32 @@ export const TopBundleAnalysis: React.FC = () => {
     // supersedes this one during the async steps below — day-over-day only diffs EARLIER dates.
     saveDaySnapshots(reportDate, std);
 
-    // ── If there's no prior day on record, backfill the MOST RECENT prior day from Slack
-    //    (by filename date — auto-skips weekends/holidays/gaps), same as the headless job. ──
-    if (!previousDailyTotals(reportDate)) {
-      try {
-        addLog('info', `No prior day on record — fetching the most recent prior day from Slack (before ${reportDate})…`);
-        const res = await fetchPriorFromSlack(reportDate);
-        if (myRun !== runIdRef.current) return;
-        if (!res) {
-          addLog('warn', 'No earlier TSV found in Slack — running as baseline (no day-over-day).');
+    // ── Always refresh the MOST RECENT prior day from Slack (by filename date — auto-skips
+    //    weekends/holidays/gaps) so the day-over-day baseline is recomputed from the real
+    //    prior-day file every run, never a stale/partial localStorage snapshot. Matches the
+    //    headless job, which always fetches fresh. Falls back to the stored snapshot only
+    //    when Slack is unavailable or has no earlier file. ──
+    const hadStoredBaseline = !!previousDailyTotals(reportDate);
+    try {
+      addLog('info', `Refreshing the prior day from Slack (most recent before ${reportDate})…`);
+      const res = await fetchPriorFromSlack(reportDate);
+      if (myRun !== runIdRef.current) return;
+      if (!res) {
+        addLog(hadStoredBaseline ? 'warn' : 'info', hadStoredBaseline
+          ? 'No earlier TSV in Slack — falling back to the stored snapshot for day-over-day.'
+          : 'No earlier TSV in Slack and none on record — running as baseline (no day-over-day).');
+      } else {
+        const pPrev = parseCsvText(res.text, res.filename);
+        const stdPrev = standardizeMapped(pPrev.rows, autoMap(pPrev.headers));
+        if (stdPrev.length) {
+          saveDaySnapshots(res.date, stdPrev);
+          addLog('info', `Baseline refreshed from Slack: ${res.date} (${res.filename}, ${stdPrev.length} rows).`);
         } else {
-          const pPrev = parseCsvText(res.text, res.filename);
-          const stdPrev = standardizeMapped(pPrev.rows, autoMap(pPrev.headers));
-          if (stdPrev.length) {
-            saveDaySnapshots(res.date, stdPrev);
-            addLog('info', `Backfilled ${res.date} from Slack (${res.filename}, ${stdPrev.length} rows) — day-over-day now available.`);
-          } else {
-            addLog('warn', `Prior file ${res.filename} produced 0 usable rows.`);
-          }
+          addLog('warn', `Prior file ${res.filename} produced 0 usable rows — falling back to the stored snapshot.`);
         }
-      } catch (e) {
-        addLog('warn', `Slack backfill failed: ${(e as Error).message.slice(0, 120)}`);
       }
+    } catch (e) {
+      addLog('warn', `Prior-day fetch failed (${(e as Error).message.slice(0, 120)}) — falling back to the stored snapshot.`);
     }
 
     // ── Day-over-day vs the most recent prior day on record (diff before saving today) ──
@@ -559,7 +563,7 @@ export const TopBundleAnalysis: React.FC = () => {
             <span className="import-tile-icon"><MessageSquare size={18} /></span>
             <h3>Auto-fetch from Slack</h3>
             <p className="import-tile-desc">
-              Grabs the newest dated <b>TSV</b> Looker posted to the configured channel (<code>LOOKER_SLACK_CHANNEL</code> in <code>server/.env</code>) — files are named <code>bundle_performance_YYYYMMDD.tsv</code>; the same-name CSV is ignored. The bot needs <code>files:read</code> and must be in the channel. Missing prior days are auto-backfilled by date for day-over-day.
+              Grabs the newest dated <b>TSV</b> Looker posted to the configured channel (<code>LOOKER_SLACK_CHANNEL</code> in <code>server/.env</code>) — files are named <code>bundle_performance_YYYYMMDD.tsv</code>; the same-name CSV is ignored. The bot needs <code>files:read</code> and must be in the channel. The prior day is always re-fetched from Slack each run so the day-over-day baseline is accurate (never a stale snapshot).
             </p>
             <button className="btn btn-primary" style={{ alignSelf: 'flex-start' }}
               onClick={handleFetchSlack} disabled={slackFetching}>
