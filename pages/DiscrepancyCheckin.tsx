@@ -1,8 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
 import {
   Play, Upload, Download, Send, Eye, EyeOff, X, Plus, RotateCcw,
-  AlertTriangle, CheckCircle2, Loader2, ChevronDown, ChevronUp, Terminal, Settings, Sparkles,
+  AlertTriangle, CheckCircle2, Loader2, ChevronDown, ChevronUp, Terminal, Settings, Sparkles, Square,
 } from 'lucide-react';
 import { DiscrepancyRow, DiscrepancyTokens, DISCREPANCY_CONFIG } from '@/services/discrepancy/types';
 import { fetchAllPublishers, diagnoseError } from '@/services/discrepancy/apiService';
@@ -231,6 +231,8 @@ export const DiscrepancyCheckin: React.FC = () => {
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [fetchErrors, setFetchErrors] = useState<{ publisherId: string; error: string }[]>([]);
   const [error, setError] = useState('');
+  // Lets the user interrupt an in-progress run (aborts in-flight requests + stops the queue).
+  const abortRef = useRef<AbortController | null>(null);
 
   // ── run log ──
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -329,12 +331,21 @@ export const DiscrepancyCheckin: React.FC = () => {
     const tokens: DiscrepancyTokens = { pubtoken: pubtoken.trim(), bearerToken: bearerToken.trim(), cookie: cookie.trim() || undefined };
     addLog('info', `Starting report for ${reportDate} across ${publisherIds.length} publishers (flagging any discrepancies over ±${(DISCREPANCY_CONFIG.highlightThreshold * 100).toFixed(0)}%)`);
 
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     try {
-      const { rows: fetched, errors } = await fetchAllPublishers(
+      const { rows: fetched, errors, aborted } = await fetchAllPublishers(
         publisherIds, reportDate, reportDate, tokens,
         (p) => setProgress({ current: p.current, total: p.total }),
-        addLog
+        addLog,
+        controller.signal
       );
+      if (aborted) {
+        addLog('warn', `Run interrupted by user (fetched ${fetched.length} line item${fetched.length === 1 ? '' : 's'} before stopping). Click "Run Report" to start again.`);
+        setRunState('idle');
+        return;
+      }
       setFetchErrors(errors);
       const succeeded = publisherIds.length - errors.length;
       if (errors.length === 0) {
@@ -387,6 +398,16 @@ export const DiscrepancyCheckin: React.FC = () => {
       setError(msg);
       addLog('error', `Report failed to complete: ${msg}${hint ? `\n           ↳ Likely reason: ${hint}` : ''}`);
       setRunState('error');
+    }
+  };
+
+  /** Interrupt an in-progress run. Aborts in-flight requests and stops the queue; the
+      user can then click Run Report again. (On the desktop app the ~3 already-in-flight
+      native requests finish on their own, but no new ones start.) */
+  const handleStop = () => {
+    if (abortRef.current && !abortRef.current.signal.aborted) {
+      abortRef.current.abort();
+      addLog('warn', 'Interrupting the run…');
     }
   };
 
@@ -513,10 +534,17 @@ export const DiscrepancyCheckin: React.FC = () => {
               ? ' Desktop app mode: requests are sent directly — no proxy server needed.'
               : ' Dev mode: requires the local proxy (npm run proxy).'}
           </p>
-          <button className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }} onClick={handleRun} disabled={!canRun}>
-            {isRunning ? <Loader2 size={16} className="animate-spin" /> : <Play size={16} />}
-            {runState === 'fetching' ? `Fetching ${progress.current}/${progress.total}...` : 'Run Report'}
-          </button>
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <button className="btn btn-primary" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }} onClick={handleRun} disabled={!canRun}>
+              {isRunning ? <Loader2 size={16} className="animate-spin" /> : <Play size={16} />}
+              {runState === 'fetching' ? `Fetching ${progress.current}/${progress.total}...` : 'Run Report'}
+            </button>
+            {isRunning && (
+              <button className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', whiteSpace: 'nowrap' }} onClick={handleStop} title="Interrupt the run">
+                <Square size={15} /> Stop
+              </button>
+            )}
+          </div>
           {isRunning && progress.total > 0 && (
             <div style={{ background: '#e5e7eb', borderRadius: '999px', height: '8px', overflow: 'hidden' }}>
               <div style={{ background: 'var(--primary)', height: '100%', width: `${(progress.current / progress.total) * 100}%`, transition: 'width 0.3s' }} />

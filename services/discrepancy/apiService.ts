@@ -89,8 +89,10 @@ async function fetchOnce(
   fromDate: string,
   toDate: string,
   tokens: DiscrepancyTokens,
-  onLog?: LogFn
+  onLog?: LogFn,
+  signal?: AbortSignal
 ): Promise<DiscrepancyRow[]> {
+  if (signal?.aborted) throw new DOMException('Run interrupted', 'AbortError');
   const targetUrl = buildReportUrl(publisherId, fromDate, toDate);
 
   let text: string;
@@ -122,9 +124,15 @@ async function fetchOnce(
     if (tokens.cookie) headers['x-pm-cookie'] = tokens.cookie;
 
     // AbortController actually cancels the socket on timeout (frees the connection),
-    // so one hung request can't stall the whole run.
+    // so one hung request can't stall the whole run. The external `signal` (user Stop)
+    // is chained in so an interrupt cancels the in-flight request too.
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), DISCREPANCY_CONFIG.fetchTimeoutMs);
+    const onExternalAbort = () => controller.abort();
+    if (signal) {
+      if (signal.aborted) controller.abort();
+      else signal.addEventListener('abort', onExternalAbort);
+    }
     try {
       const resp = await fetch(proxied, { headers, signal: controller.signal });
       text = await resp.text();
@@ -134,12 +142,14 @@ async function fetchOnce(
         throw err;
       }
     } catch (e) {
+      if (signal?.aborted) throw new DOMException('Run interrupted', 'AbortError');
       if ((e as any)?.name === 'AbortError' || controller.signal.aborted) {
         throw new Error(`Request timed out after ${DISCREPANCY_CONFIG.fetchTimeoutMs / 1000}s — no response for publisher ${publisherId} (skipped so the run can finish)`);
       }
       throw e;
     } finally {
       clearTimeout(timer);
+      if (signal) signal.removeEventListener('abort', onExternalAbort);
     }
   }
 
@@ -245,17 +255,20 @@ export async function fetchDiscrepancyData(
   fromDate: string,
   toDate: string,
   tokens: DiscrepancyTokens,
-  onLog?: LogFn
+  onLog?: LogFn,
+  signal?: AbortSignal
 ): Promise<DiscrepancyRow[]> {
   const maxRetries = 3;
   const baseDelay = 2000;
   let lastError: Error | null = null;
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    if (signal?.aborted) throw new DOMException('Run interrupted', 'AbortError');
     try {
-      return await fetchOnce(publisherId, fromDate, toDate, tokens, onLog);
+      return await fetchOnce(publisherId, fromDate, toDate, tokens, onLog, signal);
     } catch (err) {
       lastError = err as Error;
+      if (signal?.aborted || (err as any)?.name === 'AbortError') throw lastError; // no retry on interrupt
       const status = (err as any).status as number | undefined;
       const retryable = status === undefined || (status >= 500 && status < 600);
       if (retryable && attempt < maxRetries) {
@@ -277,8 +290,9 @@ export async function fetchAllPublishers(
   toDate: string,
   tokens: DiscrepancyTokens,
   onProgress?: (p: RunProgress) => void,
-  onLog?: LogFn
-): Promise<{ rows: DiscrepancyRow[]; errors: PublisherFetchError[] }> {
+  onLog?: LogFn,
+  signal?: AbortSignal
+): Promise<{ rows: DiscrepancyRow[]; errors: PublisherFetchError[]; aborted: boolean }> {
   const rows: DiscrepancyRow[] = [];
   const errors: PublisherFetchError[] = [];
   let done = 0;
@@ -287,24 +301,28 @@ export async function fetchAllPublishers(
 
   const worker = async () => {
     while (queue.length) {
+      if (signal?.aborted) return;           // interrupted — stop picking up new publishers
       const pubId = queue.shift();
       if (!pubId) break;
       try {
-        const r = await fetchDiscrepancyData(pubId, fromDate, toDate, tokens, onLog);
+        const r = await fetchDiscrepancyData(pubId, fromDate, toDate, tokens, onLog, signal);
         // Loop-push (not `rows.push(...r)`): spreading a large array overflows the call stack.
         for (let i = 0; i < r.length; i++) rows.push(r[i]);
       } catch (err) {
+        if (signal?.aborted || (err as any)?.name === 'AbortError') return; // interrupted — not a publisher failure
         const msg = (err as Error).message;
         errors.push({ publisherId: pubId, error: msg });
         const hint = diagnoseError(msg);
         onLog?.('error', `Publisher ${pubId}: FAILED — ${msg.slice(0, 200)}${hint ? `\n           ↳ Probable cause: ${hint}` : ''}`);
       } finally {
-        done += 1;
-        onProgress?.({ current: done, total: publisherIds.length, publisherId: pubId });
+        if (!signal?.aborted) {
+          done += 1;
+          onProgress?.({ current: done, total: publisherIds.length, publisherId: pubId });
+        }
       }
     }
   };
 
   await Promise.all(Array.from({ length: Math.min(concurrency, publisherIds.length) }, worker));
-  return { rows, errors };
+  return { rows, errors, aborted: signal?.aborted ?? false };
 }
