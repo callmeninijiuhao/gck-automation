@@ -30,8 +30,16 @@ const aggTable = (rows: AggRow[], cols: [keyof AggRow | 'ecpmF' | 'bidF', string
   return `${header}\n${body}`;
 };
 
-const signedPct = (frac: number | null): string =>
-  frac === null ? 'n/a' : `${frac >= 0 ? '+' : ''}${Math.round(frac * 100)}%`;
+// Whole % once |Δ| rounds to ≥1%; smaller-but-nonzero moves keep up to 2 decimals so the
+// model is handed the real value (e.g. "-0.02%") instead of a flattened "0%".
+const signedPct = (frac: number | null): string => {
+  if (frac === null) return 'n/a';
+  const pct = frac * 100;
+  const r = Math.round(pct);
+  if (r !== 0) return `${r > 0 ? '+' : ''}${r}%`;
+  if (Math.abs(pct) < 0.005) return '0%';
+  return `${pct > 0 ? '+' : ''}${pct.toFixed(2)}%`;
+};
 
 /** Compact day-over-day digest for the model — PMR is the KPI, so movers are ranked
     by PMR change (spend shown alongside). Covers region / POD / DSP / publisher /

@@ -361,8 +361,17 @@ export function computeMetrics(rows: BundleRow[]): AnalysisMetrics {
 
 // ── deterministic executive-summary helpers (PMR-based DoD attribution) ──
 const roundPct = (frac: number) => Math.round(frac * 100);
-/** Signed % (e.g. "+12%", "-8%"). '' when null. Kept signed so renderers can colour it. */
-const signed = (frac: number | null): string => (frac === null ? '' : `${frac >= 0 ? '+' : ''}${roundPct(frac)}%`);
+/** Signed % (e.g. "+12%", "-8%"). '' when null. Kept signed so renderers can colour it.
+    Once |Δ| rounds to ≥1% it shows a whole number; smaller-but-nonzero moves show up to
+    2 decimals so a tiny change isn't flattened to a misleading "0%" (e.g. "-0.02%"). */
+const signed = (frac: number | null): string => {
+  if (frac === null) return '';
+  const pct = frac * 100;
+  const r = Math.round(pct);
+  if (r !== 0) return `${r > 0 ? '+' : ''}${r}%`;
+  if (Math.abs(pct) < 0.005) return '0%';   // genuinely negligible
+  return `${pct > 0 ? '+' : ''}${pct.toFixed(2)}%`;
+};
 
 /** Single most likely PMR driver for the opening line: top publisher gainer, else top POD/region gainer. */
 function leadDriver(dod?: DoDContext | null): string {

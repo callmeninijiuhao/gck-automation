@@ -435,7 +435,9 @@ export const TopBundleAnalysis: React.FC = () => {
     const countryRanked = byCountry(std, 30);
     const adFormatRanked = byAdFormat(std, 30);
     const regionDod = diffDim(regionRanked, previousDimSnapshot('region', reportDate), 'region', 10);
-    const podDod = diffDim(podRanked, previousDimSnapshot('pod', reportDate), 'pod', 10);
+    // topN 30 matches the By POD table (byPod default) + the saved snapshot, so every
+    // displayed POD gets a "vs prev" instead of "—" for ranks 11+.
+    const podDod = diffDim(podRanked, previousDimSnapshot('pod', reportDate), 'pod', 30);
     const dspDod = diffDim(dspRanked, previousDimSnapshot('dsp', reportDate), 'dsp', 10);
     const countryDod = diffDim(countryRanked, previousDimSnapshot('country', reportDate), 'country', 10);
     const adFormatDod = diffDim(adFormatRanked, previousDimSnapshot('adFormat', reportDate), 'adFormat', 12);
