@@ -599,7 +599,7 @@ export const TopBundleAnalysis: React.FC = () => {
             <span className="import-tile-icon"><MessageSquare size={18} /></span>
             <h3>Auto-fetch from Slack</h3>
             <p className="import-tile-desc">
-              Grabs the newest dated <b>TSV</b> Looker posted to the configured channel (<code>LOOKER_SLACK_CHANNEL</code> in <code>server/.env</code>) — files are named <code>bundle_performance_YYYYMMDD.tsv</code>; the same-name CSV is ignored. The bot needs <code>files:read</code> and must be in the channel. The prior day is always re-fetched from Slack each run so the day-over-day baseline is accurate (never a stale snapshot).
+              Grabs the newest dated <b>TSV</b> Looker posted to the configured channel (<code>LOOKER_SLACK_CHANNEL</code> in <code>server/.env</code>) — files are named <code>bundle_performance_YYYYMMDD.tsv</code>; the same-name CSV is ignored. The bot needs <code>files:read</code> and must be in the channel. Each run checks the prior day against Slack by file id and only re-downloads it if it changed — accurate baseline, no wasted re-fetch.
             </p>
             <button className="btn btn-primary" style={{ alignSelf: 'flex-start' }}
               onClick={handleFetchSlack} disabled={slackFetching}>
