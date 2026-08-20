@@ -259,7 +259,9 @@ export function dimChangeOf(dod: DimDayOverDay | null, name: string): DimChange 
 // snapshots only cover the top rows, which would understate the true total).
 // ─────────────────────────────────────────────
 const TOTALS_KEY = 'top_bundle_totals_v3';
-export interface DailyTotals { inAppSpend: number; pmr: number; revenue: number; }
+/** fileId = the Slack file this day's snapshot was computed from, so a re-run can
+    reuse the cached baseline (skip re-download) when the file is unchanged. */
+export interface DailyTotals { inAppSpend: number; pmr: number; revenue: number; fileId?: string; }
 
 export function saveDailyTotals(date: string, t: DailyTotals): void {
   try {
@@ -276,6 +278,14 @@ export function previousDailyTotals(beforeDate: string): { date: string; totals:
     const prior = Object.keys(s).filter((d) => d < beforeDate).sort();
     const d = prior[prior.length - 1];
     return d ? { date: d, totals: s[d] } : null;
+  } catch { return null; }
+}
+
+/** Stored totals for a specific date (incl. the Slack fileId it came from), or null. */
+export function dailyTotalsForDate(date: string): DailyTotals | null {
+  try {
+    const s: Record<string, DailyTotals> = JSON.parse(localStorage.getItem(TOTALS_KEY) || '{}');
+    return s[date] ?? null;
   } catch { return null; }
 }
 

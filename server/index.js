@@ -331,6 +331,12 @@ app.get('/api/slack/looker-latest', async (req, res) => {
             file = dataFiles[0];
         }
 
+        // Metadata-only "peek" (no download): lets the client learn the selected file's
+        // id/date cheaply and skip re-downloading a huge file it already processed.
+        if (req.query.meta) {
+            return res.json({ ok: true, filename: file.name || 'looker.tsv', fileId: file.id || null, createdAt: file.created || null });
+        }
+
         const dl = await fetch(file.url_private_download || file.url_private, {
             headers: { Authorization: `Bearer ${token}` },
         });
@@ -338,7 +344,7 @@ app.get('/api/slack/looker-latest', async (req, res) => {
         if (!dl.ok) return res.status(200).json({ ok: false, error: `Download failed: HTTP ${dl.status}` });
 
         console.log(`[Slack] Fetched Looker file "${file.name}" from ${channel} (${csv.length} bytes)`);
-        res.json({ ok: true, filename: file.name || 'looker.csv', createdAt: file.created || null, csv });
+        res.json({ ok: true, filename: file.name || 'looker.csv', fileId: file.id || null, createdAt: file.created || null, csv });
     } catch (err) {
         console.error('[Slack] looker-latest failed:', err.message);
         res.status(200).json({ ok: false, error: err.message });

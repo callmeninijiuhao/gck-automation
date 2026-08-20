@@ -16,6 +16,7 @@ import { PROXY_BASE } from '@/services/discrepancy/apiService';
 import { isTauri, nativeFetch } from '@/services/discrepancy/nativeBridge';
 
 interface SlackFile {
+  id?: string;
   name?: string;
   filetype?: string;
   created?: number;
@@ -35,7 +36,11 @@ function pickLatestExport(files: SlackFile[], match: string): SlackFile | null {
   return data[0] ?? null;
 }
 
-export interface SlackFetchResult { filename: string; text: string; }
+export interface SlackFetchResult { filename: string; text: string; fileId?: string; }
+
+/** Lightweight metadata about the file that WOULD be fetched — no download. Used to
+    check the Slack file id before re-downloading a huge file we already processed. */
+export interface SlackPeek { fileId?: string; filename: string; date: string; }
 
 export async function fetchLatestFromSlack(
   channel: string, match: string, slackToken?: string,
@@ -55,14 +60,36 @@ export async function fetchLatestFromSlack(
     if (!file) throw new Error('No matching CSV/TSV file found in that channel.');
     const dl = await nativeFetch(file.url_private_download || file.url_private || '', { headers: auth });
     if (!dl.ok) throw new Error(`Download failed HTTP ${dl.status}`);
-    return { filename: file.name || 'looker.csv', text: dl.text };
+    return { filename: file.name || 'looker.csv', text: dl.text, fileId: file.id };
   }
 
   const resp = await fetch(
     `${PROXY_BASE}/api/slack/looker-latest?channel=${encodeURIComponent(channel)}&match=${encodeURIComponent(match)}`);
   const data = await resp.json();
   if (!data.ok) throw new Error(data.error || 'Slack fetch failed');
-  return { filename: data.filename || 'looker.csv', text: data.csv || '' };
+  return { filename: data.filename || 'looker.csv', text: data.csv || '', fileId: data.fileId };
+}
+
+/** Peek the newest matching TSV's id/name WITHOUT downloading it (files.list only). */
+export async function peekLatestFromSlack(
+  channel: string, match: string, slackToken?: string,
+): Promise<SlackPeek | null> {
+  if (isTauri()) {
+    if (!slackToken || !channel.trim()) return null;
+    const auth = { Authorization: `Bearer ${slackToken}` };
+    const listRes = await nativeFetch(
+      `https://slack.com/api/files.list?channel=${encodeURIComponent(channel)}&count=100`, { headers: auth });
+    if (!listRes.ok) return null;
+    const list = JSON.parse(listRes.text);
+    if (!list.ok) return null;
+    const file = pickLatestExport(list.files || [], match);
+    return file ? { fileId: file.id, filename: file.name || '', date: filenameDate(file.name) } : null;
+  }
+  const resp = await fetch(
+    `${PROXY_BASE}/api/slack/looker-latest?channel=${encodeURIComponent(channel)}&match=${encodeURIComponent(match)}&meta=1`);
+  const data = await resp.json();
+  if (!data.ok) return null;
+  return { fileId: data.fileId, filename: data.filename || '', date: filenameDate(data.filename) };
 }
 
 /** Filename substrings for a given ISO date (Looker names its files by date, but the
@@ -148,7 +175,7 @@ export async function fetchPriorFromSlack(
     if (!top) return null;
     const dl = await nativeFetch(top.f.url_private_download || top.f.url_private || '', { headers: auth });
     if (!dl.ok) throw new Error(`Download failed HTTP ${dl.status}`);
-    return { filename: top.f.name || 'looker.tsv', text: dl.text, date: top.d };
+    return { filename: top.f.name || 'looker.tsv', text: dl.text, date: top.d, fileId: top.f.id };
   }
 
   const resp = await fetch(
@@ -158,5 +185,35 @@ export async function fetchPriorFromSlack(
     if (/no (matching|file|tsv)/i.test(data.error || '')) return null;   // no earlier day present
     throw new Error(data.error || 'Slack fetch failed');
   }
-  return { filename: data.filename || 'looker.tsv', text: data.csv || '', date: filenameDate(data.filename) };
+  return { filename: data.filename || 'looker.tsv', text: data.csv || '', date: filenameDate(data.filename), fileId: data.fileId };
+}
+
+/** Peek the most-recent prior day's file id/name/date strictly before `beforeIso`,
+    WITHOUT downloading it — so the caller can reuse a cached baseline when unchanged. */
+export async function peekPriorFromSlack(
+  beforeIso: string, channel = '', match = '', slackToken?: string,
+): Promise<SlackPeek | null> {
+  if (isTauri()) {
+    if (!slackToken || !channel.trim()) return null;
+    const auth = { Authorization: `Bearer ${slackToken}` };
+    const listRes = await nativeFetch(
+      `https://slack.com/api/files.list?channel=${encodeURIComponent(channel)}&count=100`, { headers: auth });
+    if (!listRes.ok) return null;
+    const list = JSON.parse(listRes.text);
+    if (!list.ok) return null;
+    const m = match.trim().toLowerCase();
+    const dated = (list.files || [])
+      .filter((f: SlackFile) => isTsv(f) && (!m || (f.name || '').toLowerCase().includes(m)))
+      .map((f: SlackFile) => ({ f, d: filenameDate(f.name) }))
+      .filter((x: { f: SlackFile; d: string }) => x.d && x.d < beforeIso)
+      .sort((a: { f: SlackFile; d: string }, b: { f: SlackFile; d: string }) =>
+        (a.d < b.d ? 1 : a.d > b.d ? -1 : (b.f.created || 0) - (a.f.created || 0)));
+    const top = dated[0];
+    return top ? { fileId: top.f.id, filename: top.f.name || '', date: top.d } : null;
+  }
+  const resp = await fetch(
+    `${PROXY_BASE}/api/slack/looker-latest?channel=${encodeURIComponent(channel)}&match=${encodeURIComponent(match)}&before=${encodeURIComponent(beforeIso)}&meta=1`);
+  const data = await resp.json();
+  if (!data.ok) return null;
+  return { fileId: data.fileId, filename: data.filename || '', date: filenameDate(data.filename) };
 }

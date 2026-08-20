@@ -5,7 +5,7 @@ import {
   MessageSquare, RefreshCw, ArrowUp, ArrowDown,
 } from 'lucide-react';
 import { parseFile, parseCsvText, autoMap, FIELD_LABELS, REQUIRED_FIELDS, CanonicalField, ParsedFile } from '@/services/top-bundle/fileParser';
-import { fetchLatestFromSlack, fetchPriorFromSlack } from '@/services/top-bundle/slackFetch';
+import { fetchLatestFromSlack, fetchPriorFromSlack, peekLatestFromSlack, peekPriorFromSlack } from '@/services/top-bundle/slackFetch';
 import {
   standardizeMapped, topBundles, topPublishers, byDsp, byCountry, byRegion, byPod, byAdFormat,
   adFormatPivot, bundlePublisherBreakdown, partnerList, computeMetrics, generateStructuredSummary, inApp,
@@ -16,7 +16,7 @@ import {
   saveSnapshot, previousSnapshot, diffTopN, bundleChangeMap, BundleChange,
   savePublisherSnapshot, previousPublisherSnapshot, diffPublishers, PublisherDayOverDay,
   saveDimSnapshot, previousDimSnapshot, diffDim, dimChangeOf, DimDayOverDay,
-  saveDailyTotals, previousDailyTotals, overallDayOverDay, OverallDoD, DoDContext,
+  saveDailyTotals, previousDailyTotals, dailyTotalsForDate, overallDayOverDay, OverallDoD, DoDContext,
 } from '@/services/top-bundle/history';
 import {
   buildEmailHtml, buildEmailSubject, partnerCsv, ReportSummaries, EmailDoD,
@@ -60,8 +60,9 @@ function normalizeDate(s: string): string {
 }
 
 /** Persist every per-day snapshot used for day-over-day (bundles, publishers, dims, totals).
-    Shared by today's run and the Slack previous-day backfill. */
-function saveDaySnapshots(date: string, std: BundleRow[]): void {
+    Shared by today's run and the Slack previous-day refresh. `fileId` records which Slack
+    file produced this snapshot so a later run can skip re-downloading an unchanged file. */
+function saveDaySnapshots(date: string, std: BundleRow[], fileId?: string): void {
   saveSnapshot(date, topBundles(std, 200));
   savePublisherSnapshot(date, topPublishers(std, 100), 'all');
   savePublisherSnapshot(date, gckPublishers(std, 100), 'gck');
@@ -72,7 +73,7 @@ function saveDaySnapshots(date: string, std: BundleRow[]): void {
   saveDimSnapshot('adFormat', date, byAdFormat(std, 30), 'adFormat');
   saveDimSnapshot('gckbundle', date, gckBundles(std, 50), 'appName');
   const m = computeMetrics(std);
-  saveDailyTotals(date, { inAppSpend: m.inAppSpend, pmr: m.inAppPmr, revenue: m.totalRevenue });
+  saveDailyTotals(date, { inAppSpend: m.inAppSpend, pmr: m.inAppPmr, revenue: m.totalRevenue, fileId });
 }
 
 /** Coloured PMR up/down/new arrow for a day-over-day change (publisher / country / dimension). */
@@ -257,6 +258,9 @@ export const TopBundleAnalysis: React.FC = () => {
 
   // ── Slack auto-fetch (channel + token configured on the backend in server/.env) ──
   const [slackFetching, setSlackFetching] = useState(false);
+  // Slack file id of the currently-loaded "today" file — used to skip re-downloading
+  // the same file. undefined for a manual upload (no Slack identity).
+  const [loadedFileId, setLoadedFileId] = useState<string | undefined>(undefined);
 
   // ── recipients (persisted) ──
   const [recipients, setRecipientsState] = useState<string[]>(() => loadList(RECIPIENTS_KEY, DEFAULT_EMAIL_RECIPIENTS));
@@ -339,15 +343,23 @@ export const TopBundleAnalysis: React.FC = () => {
   };
 
   const handleFile = async (file: File) => {
-    try { applyParsed(await parseFile(file), file.name); }
+    try { setLoadedFileId(undefined); applyParsed(await parseFile(file), file.name); }
     catch (err) { setError(`Failed to read file: ${(err as Error).message}`); }
   };
 
   const handleFetchSlack = async () => {
     setSlackFetching(true); setError('');
     try {
+      // Cheap peek first (files.list, no download): if the newest Slack file is the one we
+      // already have loaded, skip the large re-download entirely.
+      const peek = await peekLatestFromSlack('', '', '');
+      if (peek?.fileId && loadedFileId && peek.fileId === loadedFileId) {
+        addLog('info', `Latest Slack file unchanged (${peek.filename}) — already loaded, skipped re-download.`);
+        return;
+      }
       // Channel + match come from server/.env (dev); token from server too.
-      const { filename, text } = await fetchLatestFromSlack('', '', '');
+      const { filename, text, fileId } = await fetchLatestFromSlack('', '', '');
+      setLoadedFileId(fileId);
       applyParsed(parseCsvText(text, filename), `Slack: ${filename}`);
     } catch (err) {
       setError(`Slack fetch failed: ${(err as Error).message}`);
@@ -391,30 +403,38 @@ export const TopBundleAnalysis: React.FC = () => {
 
     // Persist today's snapshot immediately (keyed by date) so it survives even if a newer run
     // supersedes this one during the async steps below — day-over-day only diffs EARLIER dates.
-    saveDaySnapshots(reportDate, std);
+    // Record the Slack file id (when the data came from Slack) so a later run can reuse it.
+    saveDaySnapshots(reportDate, std, loadedFileId);
 
-    // ── Always refresh the MOST RECENT prior day from Slack (by filename date — auto-skips
-    //    weekends/holidays/gaps) so the day-over-day baseline is recomputed from the real
-    //    prior-day file every run, never a stale/partial localStorage snapshot. Matches the
-    //    headless job, which always fetches fresh. Falls back to the stored snapshot only
-    //    when Slack is unavailable or has no earlier file. ──
+    // ── Refresh the day-over-day baseline from the MOST RECENT prior day (by filename date —
+    //    auto-skips weekends/holidays/gaps). PEEK the prior file's id first (cheap, no download):
+    //    if we already hold a snapshot computed from that exact file, reuse it and skip the large
+    //    re-download; only download when the file is new/changed. Keeps the baseline accurate
+    //    (tied to file identity) without re-fetching ~200MB every run. Falls back to the stored
+    //    snapshot when Slack is unavailable. ──
     const hadStoredBaseline = !!previousDailyTotals(reportDate);
     try {
-      addLog('info', `Refreshing the prior day from Slack (most recent before ${reportDate})…`);
-      const res = await fetchPriorFromSlack(reportDate);
+      const peek = await peekPriorFromSlack(reportDate);
       if (myRun !== runIdRef.current) return;
-      if (!res) {
+      if (!peek) {
         addLog(hadStoredBaseline ? 'warn' : 'info', hadStoredBaseline
           ? 'No earlier TSV in Slack — falling back to the stored snapshot for day-over-day.'
           : 'No earlier TSV in Slack and none on record — running as baseline (no day-over-day).');
+      } else if (dailyTotalsForDate(peek.date) && peek.fileId && dailyTotalsForDate(peek.date)!.fileId === peek.fileId) {
+        addLog('info', `Prior day ${peek.date} unchanged (${peek.filename}) — baseline reused from cache, no re-download.`);
       } else {
-        const pPrev = parseCsvText(res.text, res.filename);
-        const stdPrev = standardizeMapped(pPrev.rows, autoMap(pPrev.headers));
-        if (stdPrev.length) {
-          saveDaySnapshots(res.date, stdPrev);
-          addLog('info', `Baseline refreshed from Slack: ${res.date} (${res.filename}, ${stdPrev.length} rows).`);
-        } else {
-          addLog('warn', `Prior file ${res.filename} produced 0 usable rows — falling back to the stored snapshot.`);
+        addLog('info', `Fetching prior day ${peek.date} from Slack (${peek.filename})…`);
+        const res = await fetchPriorFromSlack(reportDate);
+        if (myRun !== runIdRef.current) return;
+        if (res) {
+          const pPrev = parseCsvText(res.text, res.filename);
+          const stdPrev = standardizeMapped(pPrev.rows, autoMap(pPrev.headers));
+          if (stdPrev.length) {
+            saveDaySnapshots(res.date, stdPrev, res.fileId);
+            addLog('info', `Baseline refreshed from Slack: ${res.date} (${res.filename}, ${stdPrev.length} rows).`);
+          } else {
+            addLog('warn', `Prior file ${res.filename} produced 0 usable rows — falling back to the stored snapshot.`);
+          }
         }
       }
     } catch (e) {
