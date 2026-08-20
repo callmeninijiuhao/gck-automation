@@ -354,8 +354,13 @@ export const TopBundleAnalysis: React.FC = () => {
     const myRun = ++runIdRef.current;
     setRunState('analyzing');
     addLog('info', 'Analyze clicked — starting run…');
-    // Immediate visual feedback: jump to the live Run Log so it's obvious the click registered.
-    requestAnimationFrame(() => runLogRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }));
+    // Yield so React actually paints the "Analyzing…" button state + Run Log BEFORE the heavy
+    // synchronous parse below (up to ~1M rows) blocks the main thread — otherwise the click
+    // looks unresponsive until the log appears. Double rAF = "after the next paint".
+    await new Promise<void>((resolve) => requestAnimationFrame(() => {
+      runLogRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      requestAnimationFrame(() => resolve());
+    }));
 
     const std = standardizeMapped(parsedRows, mapping);
     if (!std.length) {

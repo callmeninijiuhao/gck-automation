@@ -194,15 +194,29 @@ body {
   font-weight: 500;
   font-family: var(--font-family);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: transform 0.06s ease, box-shadow 0.15s ease, background 0.15s ease, border-color 0.15s ease;
   border: 1px solid transparent;
   white-space: nowrap;
   line-height: 1.5;
+  /* Resting depth so buttons read as solid, tappable objects. */
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.10);
+}
+
+/* Lift on hover, press down on click — immediate tactile feedback even before the
+   handler's loading state renders (CSS :active fires on mousedown, unblocked by JS). */
+.ap-shooter-scope .btn:hover:not(:disabled) {
+  box-shadow: 0 3px 8px rgba(15, 23, 42, 0.16);
+}
+
+.ap-shooter-scope .btn:active:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow: 0 1px 1px rgba(15, 23, 42, 0.12);
 }
 
 .ap-shooter-scope .btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+  box-shadow: none;
 }
 
 .ap-shooter-scope .btn-primary {
