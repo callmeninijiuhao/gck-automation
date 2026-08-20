@@ -154,10 +154,11 @@ const SecretInput: React.FC<{ label: string; value: string; onChange: (v: string
 /** Add/remove chip list (email recipients). */
 const ManagedList: React.FC<{
   items: string[]; onChange: (items: string[]) => void; defaults: string[];
-  placeholder: string; validate?: (v: string) => string | null;
-}> = ({ items, onChange, defaults, placeholder, validate }) => {
+  placeholder: string; validate?: (v: string) => string | null; collapsedCount?: number;
+}> = ({ items, onChange, defaults, placeholder, validate, collapsedCount = 12 }) => {
   const [input, setInput] = useState('');
   const [err, setErr] = useState('');
+  const [expanded, setExpanded] = useState(false);
   const add = () => {
     const values = input.split(/[\s,;]+/).map((v) => v.trim()).filter(Boolean);
     if (!values.length) return;
@@ -166,6 +167,7 @@ const ManagedList: React.FC<{
     for (const v of values) if (!merged.includes(v)) merged.push(v);
     onChange(merged); setInput(''); setErr('');
   };
+  const shown = expanded ? items : items.slice(0, collapsedCount);
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
       <div style={{ display: 'flex', gap: '0.5rem' }}>
@@ -175,14 +177,14 @@ const ManagedList: React.FC<{
         <button type="button" className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', whiteSpace: 'nowrap' }} onClick={add}>
           <Plus size={14} /> Add
         </button>
-        <button type="button" className="btn btn-secondary" title="Reset to defaults"
+        <button type="button" className="btn btn-secondary" title="Reset to default list"
           style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', whiteSpace: 'nowrap' }} onClick={() => onChange([...defaults])}>
           <RotateCcw size={14} /> Reset
         </button>
       </div>
       {err && <p style={{ fontSize: '0.75rem', color: 'var(--error)' }}>{err}</p>}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.375rem' }}>
-        {items.map((item) => (
+        {shown.map((item) => (
           <span key={item} style={{
             display: 'inline-flex', alignItems: 'center', gap: '0.25rem',
             background: 'var(--primary-subtle, #e8f1fb)', border: '1px solid #c7ddf5',
@@ -195,6 +197,13 @@ const ManagedList: React.FC<{
             </button>
           </span>
         ))}
+        {items.length > collapsedCount && (
+          <button type="button" className="btn btn-secondary"
+            style={{ padding: '0.2rem 0.625rem', fontSize: '0.75rem', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}
+            onClick={() => setExpanded(!expanded)}>
+            {expanded ? <><ChevronUp size={12} /> Collapse</> : <><ChevronDown size={12} /> Show all {items.length}</>}
+          </button>
+        )}
       </div>
     </div>
   );
@@ -612,14 +621,20 @@ export const TopBundleAnalysis: React.FC = () => {
         )}
       </div>
 
-      {/* ── recipients (config, not a pipeline step) ── */}
+      {/* ── email recipients management (same treatment as Discrepancy Check-in) ── */}
       <div className="glass-card animated-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-        <SectionHead title="Email Recipients Management">
-          Where the internal analysis (with spend + eCPM) is sent. Uses the email config from Discrepancy Check-in.
-        </SectionHead>
-        <ManagedList items={recipients} onChange={setRecipients} defaults={DEFAULT_EMAIL_RECIPIENTS}
-          placeholder="Enter email (comma/space separated for bulk add)"
-          validate={(v) => (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) ? null : `"${v}" is not a valid email`)} />
+        <h2 style={{ fontSize: 'var(--text-h3)', fontWeight: 600 }}>Email Recipients ({recipients.length})</h2>
+        <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: 0 }}>
+          Where the internal analysis (with spend + eCPM) is sent. Uses the email config from Discrepancy Check-in. Add or remove as needed; changes are saved automatically.
+        </p>
+        <ManagedList
+          items={recipients}
+          onChange={setRecipients}
+          defaults={DEFAULT_EMAIL_RECIPIENTS}
+          placeholder="Enter email address (comma/space separated for bulk add)"
+          validate={(v) => (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) ? null : `"${v}" is not a valid email address`)}
+          collapsedCount={20}
+        />
       </div>
 
       {error && (
