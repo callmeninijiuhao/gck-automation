@@ -245,8 +245,8 @@ function topBundlesMergedHtml(groups: BundleGroup[], changeMap: Record<string, B
 function noticeHtml(): string {
   return '<div style="font-size:10.5pt;background:#fff8e1;border:1px solid #f6c343;color:#7a5b00;'
     + 'padding:8px 12px;border-radius:6px;margin:10px 0">'
-    + '<b>Note:</b> Due to automated data pull file size limits, overall data may have a minor variance of ~ -0.5%, '
-    + 'primarily originating from tail end rows (bundles &lt; $0.01).'
+    + '<b>Note:</b> Due to automated data pull file size limits, totals may carry a small variance, '
+    + 'primarily from tail-end low-value rows (bundles &lt; $0.01).'
     + '</div>';
 }
 
