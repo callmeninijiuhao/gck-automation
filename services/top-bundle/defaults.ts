@@ -6,6 +6,5 @@
 
 // Same recipients as the Discrepancy Check-in tool (single source of truth) — the
 // internal DoD Performance report reuses that tool's validated email path, so the two
-// default lists stay identical. Re-exported so the page and the headless daily-brief
-// job both use it.
+// default lists stay identical.
 export { DEFAULT_EMAIL_RECIPIENTS } from '../discrepancy/defaults';

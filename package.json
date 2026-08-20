@@ -8,7 +8,6 @@
     "build": "vite build",
     "preview": "vite preview",
     "proxy": "node server/index.js",
-    "daily-brief": "node_modules/.bin/esbuild scripts/daily-brief.ts --bundle --platform=node --format=esm --packages=external --outfile=scripts/.daily-brief.mjs --log-level=warning && node --max-old-space-size=4096 scripts/.daily-brief.mjs",
     "clean": "rm -rf dist/ src-tauri/target/ node_modules/",
     "clean:build": "rm -rf dist/ src-tauri/target/.fingerprint src-tauri/target/release",
     "tauri": "tauri",

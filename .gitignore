@@ -39,6 +39,3 @@ CHANGELOG.md
 *.csv
 *.xlsx
 *.xls
-
-# headless daily-brief build artifact
-scripts/.daily-brief.mjs

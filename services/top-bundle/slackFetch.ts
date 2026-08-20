@@ -152,7 +152,7 @@ export function filenameDate(name?: string): string {
 export interface SlackPriorResult extends SlackFetchResult { date: string; }
 
 /** Fetch the MOST RECENT prior day's export strictly before `beforeIso` (by filename
-    date) — auto-skips weekends / holidays / any gap. Same logic as the headless job.
+    date) — auto-skips weekends / holidays / any gap.
     Returns null when no earlier file exists. Throws on transport/config errors. */
 export async function fetchPriorFromSlack(
   beforeIso: string, channel = '', match = '', slackToken?: string,
