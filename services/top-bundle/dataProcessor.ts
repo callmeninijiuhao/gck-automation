@@ -481,12 +481,12 @@ export function generateStructuredSummary(rows: BundleRow[], dateLabel: string, 
   const gckPubUp = gainers(dod?.gckPublishers?.rows, (r) => r.publisher);
   const gckPubDown = decliners(dod?.gckPublishers?.rows, (r) => r.publisher);
   if (gckPubUp || gckPubDown) {
-    L.push(`• Publishers${gckPubUp ? ` — growing: ${gckPubUp}` : ''}${gckPubDown ? `${gckPubUp ? ';' : ' —'} watch: ${gckPubDown}` : ''}.`);
+    L.push(`• Publishers (PMR)${gckPubUp ? ` — growing: ${gckPubUp}` : ''}${gckPubDown ? `${gckPubUp ? ';' : ' —'} watch: ${gckPubDown}` : ''}.`);
   }
   const gckBunUp = gainers(dod?.gckBundles?.rows, (r) => r.name);
   const gckBunDown = decliners(dod?.gckBundles?.rows, (r) => r.name);
   if (gckBunUp || gckBunDown) {
-    L.push(`• Bundles${gckBunUp ? ` — growing: ${gckBunUp}` : ''}${gckBunDown ? `${gckBunUp ? ';' : ' —'} watch: ${gckBunDown}` : ''}.`);
+    L.push(`• Bundles (PMR)${gckBunUp ? ` — growing: ${gckBunUp}` : ''}${gckBunDown ? `${gckBunUp ? ';' : ' —'} watch: ${gckBunDown}` : ''}.`);
   }
   if (!gckPubUp && !gckPubDown && !gckBunUp && !gckBunDown) {
     L.push('• No prior day yet for GCK — baseline set; publisher/bundle movements will show here from the next run.');

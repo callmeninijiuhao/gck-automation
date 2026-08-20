@@ -133,6 +133,7 @@ export function buildNarrativePrompt(
     + 'Actively call out where the two DIVERGE: if DSP spend rises but PMR lags (take rate compressing) or PMR rises faster than spend (margin improving), say so explicitly — that is a key monetization signal. '
     + 'Also surface notable DSP-spend movers in their own right (a buyer/region/publisher whose spend jumped or dropped), even if PMR moved less. '
     + 'For EVERY data point that has a prior day, give the vs-previous direction with a signed percentage (e.g. "+12%", "-8%") for BOTH PMR and spend where relevant, so increase vs decrease is obvious at a glance. '
+    + 'NEVER write a bare percentage: every % MUST be immediately labelled with the metric it refers to — write "PMR +32%" or "spend -16%", never a lone "+32%". A reader must never have to guess whether a number is PMR or spend. When you list several movers (e.g. GCK publishers or bundles), put the metric label once at the start of that list — e.g. "growing (PMR): X +32%, Y +26%" — so each figure is unambiguously PMR. '
     + '\n\nSTYLE: clear, direct business/data language — phenomenon + cause + business impact so a non-technical reader gets it instantly. '
     + 'Accurate over fancy: common business verbs (grow, decline, driven by, primary cause); avoid jargon, buzzwords, ornate phrasing. '
     + 'For anything down, use neutral, constructive wording (e.g. "experienced an adjustment", "shows temporary fluctuation", "normalising") — never harsh words like "collapsed", "plummeted", "bad", "failed". '
