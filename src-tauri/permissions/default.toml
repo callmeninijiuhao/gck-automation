@@ -17,3 +17,13 @@ commands.allow = ["send_slack"]
 identifier = "allow-get-send-config"
 description = "Enables the get_send_config command (reports which sending credentials are embedded; never returns secrets)."
 commands.allow = ["get_send_config"]
+
+[[permission]]
+identifier = "allow-get-looker-config"
+description = "Enables the get_looker_config command (reports the Looker Slack channel + token availability; never returns secrets)."
+commands.allow = ["get_looker_config"]
+
+[[permission]]
+identifier = "allow-looker-fetch"
+description = "Enables the looker_fetch command (fetches the Looker Slack file using the embedded token, kept in Rust)."
+commands.allow = ["looker_fetch"]

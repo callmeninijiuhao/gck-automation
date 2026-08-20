@@ -13,7 +13,14 @@
 // (private channels also need groups:history).
 // ─────────────────────────────────────────────
 import { PROXY_BASE } from '@/services/discrepancy/apiService';
-import { isTauri, nativeFetch } from '@/services/discrepancy/nativeBridge';
+import { isTauri, lookerFetch, getLookerConfig } from '@/services/discrepancy/nativeBridge';
+
+/** Desktop: resolve the Looker channel (from the arg, else the embedded build config). */
+async function tauriChannel(channel: string): Promise<string> {
+  const c = channel.trim();
+  if (c) return c;
+  return (await getLookerConfig()).channel;
+}
 
 interface SlackFile {
   id?: string;
@@ -48,17 +55,15 @@ export async function fetchLatestFromSlack(
   // Dev/browser: channel/token come from server/.env (LOOKER_SLACK_CHANNEL / _BOT_TOKEN),
   // so an empty channel here is fine. Desktop (Tauri) needs both passed in.
   if (isTauri()) {
-    if (!slackToken) throw new Error('Slack token not set — configure LOOKER_SLACK_BOT_TOKEN (desktop build).');
-    if (!channel.trim()) throw new Error('Slack channel not set for the desktop app.');
-    const auth = { Authorization: `Bearer ${slackToken}` };
-    const listRes = await nativeFetch(
-      `https://slack.com/api/files.list?channel=${encodeURIComponent(channel)}&count=100`, { headers: auth });
+    const ch = await tauriChannel(channel);
+    if (!ch) throw new Error('Looker Slack channel not configured (embed EMBED_LOOKER_SLACK_CHANNEL at build time).');
+    const listRes = await lookerFetch(`https://slack.com/api/files.list?channel=${encodeURIComponent(ch)}&count=100`);
     if (!listRes.ok) throw new Error(`Slack files.list HTTP ${listRes.status}`);
     const list = JSON.parse(listRes.text);
     if (!list.ok) throw new Error(`Slack files.list: ${list.error}`);
     const file = pickLatestExport(list.files || [], match);
     if (!file) throw new Error('No matching CSV/TSV file found in that channel.');
-    const dl = await nativeFetch(file.url_private_download || file.url_private || '', { headers: auth });
+    const dl = await lookerFetch(file.url_private_download || file.url_private || '');
     if (!dl.ok) throw new Error(`Download failed HTTP ${dl.status}`);
     return { filename: file.name || 'looker.csv', text: dl.text, fileId: file.id };
   }
@@ -75,10 +80,9 @@ export async function peekLatestFromSlack(
   channel: string, match: string, slackToken?: string,
 ): Promise<SlackPeek | null> {
   if (isTauri()) {
-    if (!slackToken || !channel.trim()) return null;
-    const auth = { Authorization: `Bearer ${slackToken}` };
-    const listRes = await nativeFetch(
-      `https://slack.com/api/files.list?channel=${encodeURIComponent(channel)}&count=100`, { headers: auth });
+    const ch = await tauriChannel(channel);
+    if (!ch) return null;
+    const listRes = await lookerFetch(`https://slack.com/api/files.list?channel=${encodeURIComponent(ch)}&count=100`);
     if (!listRes.ok) return null;
     const list = JSON.parse(listRes.text);
     if (!list.ok) return null;
@@ -112,11 +116,9 @@ export async function fetchFromSlackByDate(
   };
 
   if (isTauri()) {
-    if (!slackToken) throw new Error('Slack token not set — configure the Looker Slack token (desktop build).');
-    if (!channel.trim()) throw new Error('Slack channel not set for the desktop app.');
-    const auth = { Authorization: `Bearer ${slackToken}` };
-    const listRes = await nativeFetch(
-      `https://slack.com/api/files.list?channel=${encodeURIComponent(channel)}&count=100`, { headers: auth });
+    const ch = await tauriChannel(channel);
+    if (!ch) throw new Error('Looker Slack channel not configured (embed EMBED_LOOKER_SLACK_CHANNEL at build time).');
+    const listRes = await lookerFetch(`https://slack.com/api/files.list?channel=${encodeURIComponent(ch)}&count=100`);
     if (!listRes.ok) throw new Error(`Slack files.list HTTP ${listRes.status}`);
     const list = JSON.parse(listRes.text);
     if (!list.ok) throw new Error(`Slack files.list: ${list.error}`);
@@ -126,7 +128,7 @@ export async function fetchFromSlackByDate(
     dated.sort((a: SlackFile, b: SlackFile) => (b.created || 0) - (a.created || 0));   // newest first
     const file = dated[0];
     if (!file) return null;
-    const dl = await nativeFetch(file.url_private_download || file.url_private || '', { headers: auth });
+    const dl = await lookerFetch(file.url_private_download || file.url_private || '');
     if (!dl.ok) throw new Error(`Download failed HTTP ${dl.status}`);
     return { filename: file.name || 'looker.csv', text: dl.text };
   }
@@ -156,11 +158,9 @@ export async function fetchPriorFromSlack(
   beforeIso: string, channel = '', match = '', slackToken?: string,
 ): Promise<SlackPriorResult | null> {
   if (isTauri()) {
-    if (!slackToken) throw new Error('Slack token not set — configure the Looker Slack token (desktop build).');
-    if (!channel.trim()) throw new Error('Slack channel not set for the desktop app.');
-    const auth = { Authorization: `Bearer ${slackToken}` };
-    const listRes = await nativeFetch(
-      `https://slack.com/api/files.list?channel=${encodeURIComponent(channel)}&count=100`, { headers: auth });
+    const ch = await tauriChannel(channel);
+    if (!ch) throw new Error('Looker Slack channel not configured (embed EMBED_LOOKER_SLACK_CHANNEL at build time).');
+    const listRes = await lookerFetch(`https://slack.com/api/files.list?channel=${encodeURIComponent(ch)}&count=100`);
     if (!listRes.ok) throw new Error(`Slack files.list HTTP ${listRes.status}`);
     const list = JSON.parse(listRes.text);
     if (!list.ok) throw new Error(`Slack files.list: ${list.error}`);
@@ -173,7 +173,7 @@ export async function fetchPriorFromSlack(
         (a.d < b.d ? 1 : a.d > b.d ? -1 : (b.f.created || 0) - (a.f.created || 0)));
     const top = dated[0];
     if (!top) return null;
-    const dl = await nativeFetch(top.f.url_private_download || top.f.url_private || '', { headers: auth });
+    const dl = await lookerFetch(top.f.url_private_download || top.f.url_private || '');
     if (!dl.ok) throw new Error(`Download failed HTTP ${dl.status}`);
     return { filename: top.f.name || 'looker.tsv', text: dl.text, date: top.d, fileId: top.f.id };
   }
@@ -194,10 +194,9 @@ export async function peekPriorFromSlack(
   beforeIso: string, channel = '', match = '', slackToken?: string,
 ): Promise<SlackPeek | null> {
   if (isTauri()) {
-    if (!slackToken || !channel.trim()) return null;
-    const auth = { Authorization: `Bearer ${slackToken}` };
-    const listRes = await nativeFetch(
-      `https://slack.com/api/files.list?channel=${encodeURIComponent(channel)}&count=100`, { headers: auth });
+    const ch = await tauriChannel(channel);
+    if (!ch) return null;
+    const listRes = await lookerFetch(`https://slack.com/api/files.list?channel=${encodeURIComponent(ch)}&count=100`);
     if (!listRes.ok) return null;
     const list = JSON.parse(listRes.text);
     if (!list.ok) return null;

@@ -36,6 +36,26 @@ export async function nativeFetch(
   }
 }
 
+/** Fetch a Looker Slack URL via the Rust `looker_fetch` command, which injects the
+    embedded Looker token (kept in Rust — never reaches the frontend). */
+export async function lookerFetch(url: string): Promise<NativeResponse> {
+  try {
+    const text = await invoke<string>('looker_fetch', { url });
+    return { ok: true, status: 200, text };
+  } catch (err) {
+    const m = String(err).match(/^HTTP (\d+): ([\s\S]*)$/);
+    if (m) return { ok: false, status: parseInt(m[1], 10), text: m[2] };
+    return { ok: false, status: 0, text: String(err) };
+  }
+}
+
+/** Non-secret Looker config baked into the desktop build: which channel to read and
+    whether a token is available (so the fetch button can be enabled). */
+export async function getLookerConfig(): Promise<{ channel: string; hasToken: boolean }> {
+  try { return await invoke<{ channel: string; hasToken: boolean }>('get_looker_config'); }
+  catch { return { channel: '', hasToken: false }; }
+}
+
 /** SMTP credentials + Slack token, configured once in the app's Sending Settings */
 export interface AppSendSettings {
   smtpHost: string;

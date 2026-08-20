@@ -9,6 +9,8 @@
     "allow-native-fetch",
     "allow-send-email",
     "allow-send-slack",
-    "allow-get-send-config"
+    "allow-get-send-config",
+    "allow-get-looker-config",
+    "allow-looker-fetch"
   ]
 }

@@ -131,6 +131,16 @@ const EMBED_SLACK_BOT_TOKEN: &str = match option_env!("EMBED_SLACK_BOT_TOKEN") {
     Some(v) => v,
     None => "",
 };
+// Looker auto-fetch: the channel Looker posts the daily TSV to, and the bot token
+// with files:read on it. Token falls back to EMBED_SLACK_BOT_TOKEN when its own is unset.
+const EMBED_LOOKER_SLACK_BOT_TOKEN: &str = match option_env!("EMBED_LOOKER_SLACK_BOT_TOKEN") {
+    Some(v) => v,
+    None => "",
+};
+const EMBED_LOOKER_SLACK_CHANNEL: &str = match option_env!("EMBED_LOOKER_SLACK_CHANNEL") {
+    Some(v) => v,
+    None => "",
+};
 
 /// Tells the frontend which credentials are baked into this build,
 /// so it can hide the Sending Settings card. Never returns secret values.
@@ -284,6 +294,51 @@ async fn send_slack(
     }
 }
 
+/// Non-secret Looker config for the frontend: which channel to read, and whether a
+/// token is available so the "Fetch latest from Slack" button can be enabled. No secrets.
+#[tauri::command]
+fn get_looker_config() -> serde_json::Value {
+    serde_json::json!({
+        "channel": EMBED_LOOKER_SLACK_CHANNEL,
+        "hasToken": !EMBED_LOOKER_SLACK_BOT_TOKEN.is_empty() || !EMBED_SLACK_BOT_TOKEN.is_empty(),
+    })
+}
+
+/// GET a Slack Web API / file URL using the embedded Looker token, injected here so the
+/// token never reaches the frontend. Same success/error shape as native_fetch.
+#[tauri::command]
+async fn looker_fetch(url: String) -> Result<String, String> {
+    let token = if !EMBED_LOOKER_SLACK_BOT_TOKEN.is_empty() {
+        EMBED_LOOKER_SLACK_BOT_TOKEN.to_string()
+    } else {
+        EMBED_SLACK_BOT_TOKEN.to_string()
+    };
+    if token.is_empty() {
+        return Err("Looker Slack token not configured (embed EMBED_LOOKER_SLACK_BOT_TOKEN at build time)".to_string());
+    }
+
+    let mut builder = reqwest::Client::builder();
+    #[cfg(target_os = "macos")]
+    if let Some(proxy) = get_macos_system_proxy() {
+        builder = builder.proxy(proxy);
+    }
+    let client = builder.build().map_err(|e| e.to_string())?;
+
+    let response = client
+        .get(&url)
+        .header("Authorization", format!("Bearer {token}"))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let status = response.status();
+    let text = response.text().await.map_err(|e| e.to_string())?;
+
+    if !status.is_success() {
+        return Err(format!("HTTP {}: {}", status, text));
+    }
+    Ok(text)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -292,7 +347,9 @@ pub fn run() {
             native_fetch,
             send_email,
             send_slack,
-            get_send_config
+            get_send_config,
+            get_looker_config,
+            looker_fetch
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
