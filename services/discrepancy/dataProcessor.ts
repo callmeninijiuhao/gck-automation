@@ -214,12 +214,7 @@ export function generateStructuredSummary(rows: DiscrepancyRow[], dateLabel: str
   if (!highlights.length) {
     lines.push('', '✅ No publisher/DSP combinations exceed the ±5% Spend or Impressions Discrepancy threshold.');
   } else {
-    lines.push('', `⚠️ ${highlights.length} publisher/DSP combination(s) exceed ±${thresholdPct.toFixed(0)}% Spend or Impressions Discrepancy:`);
-    for (const r of highlights.slice(0, 10)) {
-      const name = r.publisherName ? ` (${r.publisherName})` : '';
-      lines.push(`• Publisher ${r.publisherId}${name} / ${r.dsp} — Spend ${fmtPct(r.spendDiscrepancyPct)}, Imps ${fmtPct(r.discrepancyRate)} (DSP Spend $${fmtNum(r.dspSpend)})`);
-    }
-    if (highlights.length > 10) lines.push(`... and ${highlights.length - 10} more. See the Highlight section.`);
+    lines.push('', `⚠️ ${highlights.length} publisher/DSP combination(s) exceed ±${thresholdPct.toFixed(0)}% Spend or Impressions Discrepancy. See the Highlight section.`);
   }
   return lines.join('\n');
 }
