@@ -221,11 +221,18 @@ export function dspWithBundles(rows: BundleRow[], nDsp = 10, nBundle = 5): DspGr
 export interface AdSizeRow { adSize: string; spend: number; pmr: number; ecpm: number; spendShareOfFormat: number; pmrShareOfFormat: number; }
 export interface AdFormatGroup { adFormat: string; spend: number; pmr: number; ecpm: number; spendShare: number; pmrShare: number; sizes: AdSizeRow[]; }
 
+// A blank/placeholder ad-format label ('', '-', '--', '(none)') — dropped from the pivot,
+// since a nameless format group is noise (Looker uses '-' for unknown; it is not an NA token).
+const isPlaceholderFormat = (fmt: string): boolean => {
+  const t = fmt.trim().toLowerCase();
+  return t === '' || t === '(none)' || /^-+$/.test(t);
+};
+
 export function adFormatPivot(rows: BundleRow[], displayMaxSizes = 5): AdFormatGroup[] {
   const ia = inApp(rows);
   const totalSpend = sumSpend(ia);
   const totalPmr = sumPmr(ia);
-  return aggregate(ia, ['adFormat']).map((f) => {
+  return aggregate(ia, ['adFormat']).filter((f) => !isPlaceholderFormat(String(f.adFormat ?? ''))).map((f) => {
     const fmt = String(f.adFormat ?? '') || '(none)';
     const allSizes = aggregate(ia.filter((r) => (r.adFormat ?? '') === (f.adFormat ?? '')), ['adSize'])
       .map((s) => ({

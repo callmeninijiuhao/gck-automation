@@ -890,47 +890,34 @@ export const TopBundleAnalysis: React.FC = () => {
             <DodTable firstCol="Country" rows={dimDodRows(summaries.byCountry, countryDayOverDay, 'country')} totalSpend={metrics.inAppSpend} totalPmr={metrics.inAppPmr} />
           </div>
 
-          {/* 9. Ad Format -> Size pivot (Display capped to Top 5 sizes) */}
+          {/* 9. By Ad Format (ad-size sub-rows intentionally omitted — source data no longer carries ad size) */}
           <div className="glass-card animated-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-            <h2 style={{ fontSize: '1.05rem', fontWeight: 600 }}>9. By Ad Format &amp; Size</h2>
+            <h2 style={{ fontSize: '1.05rem', fontWeight: 600 }}>9. By Ad Format</h2>
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', fontSize: '0.8125rem', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ background: 'var(--primary)', color: 'white' }}>
-                    {['Ad Format / Size', 'DSP Spend', 'DSP %', 'PMR', 'PMR %', 'vs prev', 'eCPM'].map((h, i) => (
+                    {['Ad Format', 'DSP Spend', 'DSP %', 'PMR', 'PMR %', 'vs prev', 'eCPM'].map((h, i) => (
                       <th key={h} style={{ padding: '0.5rem 0.75rem', textAlign: i === 0 ? 'left' : 'right' }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {summaries.adFormatPivot.map((g) => (
-                    <React.Fragment key={g.adFormat}>
-                      <tr style={{ background: '#eef2f8', fontWeight: 700 }}>
-                        <td style={{ padding: '0.5rem 0.75rem' }}>{g.adFormat}</td>
-                        <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtCurrency(g.spend)}</td>
-                        <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtPct(g.spendShare)}</td>
-                        <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtCurrency(g.pmr)}</td>
-                        <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtPct(g.pmrShare)}</td>
-                        <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right' }}><ChangeIndicator c={dimChangeOf(adFormatDayOverDay, g.adFormat)} /></td>
-                        <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtEcpm(g.ecpm)}</td>
-                      </tr>
-                      {g.sizes.map((s) => (
-                        <tr key={g.adFormat + s.adSize} style={{ borderBottom: '1px solid #eee' }}>
-                          <td style={{ padding: '0.4rem 0.75rem 0.4rem 1.75rem', color: 'var(--text-secondary)' }}>{s.adSize}</td>
-                          <td style={{ padding: '0.4rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtCurrency(s.spend)}</td>
-                          <td style={{ padding: '0.4rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtPct(s.spendShareOfFormat)}</td>
-                          <td style={{ padding: '0.4rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtCurrency(s.pmr)}</td>
-                          <td style={{ padding: '0.4rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtPct(s.pmrShareOfFormat)}</td>
-                          <td />
-                          <td style={{ padding: '0.4rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtEcpm(s.ecpm)}</td>
-                        </tr>
-                      ))}
-                    </React.Fragment>
+                    <tr key={g.adFormat} style={{ background: '#eef2f8', fontWeight: 700, borderBottom: '1px solid #eee' }}>
+                      <td style={{ padding: '0.5rem 0.75rem' }}>{g.adFormat}</td>
+                      <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtCurrency(g.spend)}</td>
+                      <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtPct(g.spendShare)}</td>
+                      <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtCurrency(g.pmr)}</td>
+                      <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtPct(g.pmrShare)}</td>
+                      <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right' }}><ChangeIndicator c={dimChangeOf(adFormatDayOverDay, g.adFormat)} /></td>
+                      <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right', fontFamily: 'monospace' }}>{fmtEcpm(g.ecpm)}</td>
+                    </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-            <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', margin: 0 }}>Format rows = share of total in-app (DSP % / PMR %) with PMR vs prev; size rows = share within that format. Display is limited to its Top 5 sizes. Multi-format rows (e.g. &quot;Display + Native + Video&quot;) are multi-format requests.</p>
+            <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', margin: 0 }}>Rows = share of total in-app (DSP % / PMR %) with PMR vs prev. Multi-format rows (e.g. &quot;Display + Native + Video&quot;) are multi-format requests.</p>
           </div>
 
           <div className="glass-card animated-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
