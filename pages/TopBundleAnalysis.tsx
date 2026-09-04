@@ -416,11 +416,18 @@ export const TopBundleAnalysis: React.FC = () => {
     try {
       const peek = await peekPriorFromSlack(reportDate);
       if (myRun !== runIdRef.current) return;
+      const priorStored = peek ? dailyTotalsForDate(peek.date) : null;
       if (!peek) {
         addLog(hadStoredBaseline ? 'warn' : 'info', hadStoredBaseline
           ? 'No earlier TSV in Slack — falling back to the stored snapshot for day-over-day.'
           : 'No earlier TSV in Slack and none on record — running as baseline (no day-over-day).');
-      } else if (dailyTotalsForDate(peek.date) && peek.fileId && dailyTotalsForDate(peek.date)!.fileId === peek.fileId) {
+      } else if (priorStored && !priorStored.fileId) {
+        // A prior-day snapshot with no fileId was saved from a MANUAL upload — i.e. a deliberate
+        // correction of a bad/missing Slack file. Treat it as authoritative and never overwrite it
+        // from Slack (otherwise a re-run re-downloads the bad file and clobbers the fix). To change
+        // this baseline, re-load the file manually for that date.
+        addLog('info', `Prior day ${peek.date} baseline was manually uploaded — keeping it, not overwriting from Slack (${peek.filename}).`);
+      } else if (priorStored && peek.fileId && priorStored.fileId === peek.fileId) {
         addLog('info', `Prior day ${peek.date} unchanged (${peek.filename}) — baseline reused from cache, no re-download.`);
       } else {
         addLog('info', `Fetching prior day ${peek.date} from Slack (${peek.filename})…`);
