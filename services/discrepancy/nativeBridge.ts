@@ -56,6 +56,45 @@ export async function getLookerConfig(): Promise<{ channel: string; hasToken: bo
   catch { return { channel: '', hasToken: false }; }
 }
 
+/** Fetch a Capacity Slack URL via the Rust `capacity_fetch` command, which injects the
+    embedded Capacity token (kept in Rust — never reaches the frontend). */
+export async function capacityFetch(url: string): Promise<NativeResponse> {
+  try {
+    const text = await invoke<string>('capacity_fetch', { url });
+    return { ok: true, status: 200, text };
+  } catch (err) {
+    const m = String(err).match(/^HTTP (\d+): ([\s\S]*)$/);
+    if (m) return { ok: false, status: parseInt(m[1], 10), text: m[2] };
+    return { ok: false, status: 0, text: String(err) };
+  }
+}
+
+/** Non-secret Capacity config baked into the desktop build: channel + token availability. */
+export async function getCapacityConfig(): Promise<{ channel: string; hasToken: boolean }> {
+  try { return await invoke<{ channel: string; hasToken: boolean }>('get_capacity_config'); }
+  catch { return { channel: '', hasToken: false }; }
+}
+
+/** POST a chat-completions request via the Rust `llm_complete` command, which injects the
+    embedded Brain key (kept in Rust — never reaches the frontend). `body` is raw JSON. */
+export async function llmComplete(url: string, body: string): Promise<NativeResponse> {
+  try {
+    const text = await invoke<string>('llm_complete', { url, body });
+    return { ok: true, status: 200, text };
+  } catch (err) {
+    const m = String(err).match(/^HTTP (\d+): ([\s\S]*)$/);
+    if (m) return { ok: false, status: parseInt(m[1], 10), text: m[2] };
+    return { ok: false, status: 0, text: String(err) };
+  }
+}
+
+/** Non-secret LLM config baked into the desktop build: whether a Brain key is embedded and
+    which instance (stage/prod) it targets. */
+export async function getLlmConfig(): Promise<{ hasKey: boolean; environment: string }> {
+  try { return await invoke<{ hasKey: boolean; environment: string }>('get_llm_config'); }
+  catch { return { hasKey: false, environment: 'stage' }; }
+}
+
 /** SMTP credentials + Slack token, configured once in the app's Sending Settings */
 export interface AppSendSettings {
   smtpHost: string;

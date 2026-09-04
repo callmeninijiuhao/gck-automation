@@ -18,6 +18,12 @@ fn embed_build_secrets() {
         // Looker Slack auto-fetch (Top Bundle) — must match the option_env! keys in lib.rs.
         "EMBED_LOOKER_SLACK_CHANNEL",
         "EMBED_LOOKER_SLACK_BOT_TOKEN",
+        // Capacity Monitoring Slack auto-fetch.
+        "EMBED_CAPACITY_SLACK_CHANNEL",
+        "EMBED_CAPACITY_SLACK_BOT_TOKEN",
+        // Brain LLM (AI narrative) — key + which instance (stage/prod).
+        "EMBED_BRAIN_LLM_API_KEY",
+        "EMBED_BRAIN_LLM_ENV",
     ];
 
     if let Ok(content) = fs::read_to_string(&path) {

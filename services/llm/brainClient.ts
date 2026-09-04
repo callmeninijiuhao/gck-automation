@@ -15,7 +15,7 @@
 //     in the tool's LLM settings and stored only on this computer (never in the git bundle).
 // ─────────────────────────────────────────────
 import { PROXY_BASE } from '@/services/discrepancy/apiService';
-import { isTauri, nativeFetch } from '@/services/discrepancy/nativeBridge';
+import { isTauri, nativeFetch, llmComplete, getLlmConfig } from '@/services/discrepancy/nativeBridge';
 
 export type BrainEnv = 'stage' | 'prod';
 
@@ -94,14 +94,25 @@ export async function chatComplete(messages: ChatMessage[], cfg: LlmConfig): Pro
 
   let raw: string;
   if (isTauri()) {
-    if (!cfg.apiKey) throw new Error('LLM API key not set — add it in the tool\'s LLM settings.');
-    const res = await withTimeout(nativeFetch(endpointFor(cfg.environment), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.apiKey}` },
-      body: JSON.stringify(payload),
-    }), LLM_TIMEOUT_MS);
-    if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.text.slice(0, 300)}`);
-    raw = res.text;
+    if (cfg.apiKey) {
+      // User-provided key (LLM settings): call the Brain endpoint directly via native_fetch.
+      const res = await withTimeout(nativeFetch(endpointFor(cfg.environment), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.apiKey}` },
+        body: JSON.stringify(payload),
+      }), LLM_TIMEOUT_MS);
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.text.slice(0, 300)}`);
+      raw = res.text;
+    } else {
+      // No user key: fall back to the embedded Brain key, kept in Rust (llm_complete injects
+      // it so it never reaches the frontend). The embedded config also pins the instance.
+      const llm = await getLlmConfig();
+      if (!llm.hasKey) throw new Error('LLM API key not set — add it in the tool\'s LLM settings.');
+      const env: BrainEnv = llm.environment === 'prod' ? 'prod' : 'stage';
+      const res = await withTimeout(llmComplete(endpointFor(env), JSON.stringify(payload)), LLM_TIMEOUT_MS);
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.text.slice(0, 300)}`);
+      raw = res.text;
+    }
   } else {
     // Dev/browser: key is added server-side from server/.env.
     // AbortController cancels the socket on timeout so a hung Brain call can't stall the UI.

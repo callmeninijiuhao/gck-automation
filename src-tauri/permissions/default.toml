@@ -27,3 +27,23 @@ commands.allow = ["get_looker_config"]
 identifier = "allow-looker-fetch"
 description = "Enables the looker_fetch command (fetches the Looker Slack file using the embedded token, kept in Rust)."
 commands.allow = ["looker_fetch"]
+
+[[permission]]
+identifier = "allow-get-capacity-config"
+description = "Enables the get_capacity_config command (reports the Capacity Slack channel + token availability; never returns secrets)."
+commands.allow = ["get_capacity_config"]
+
+[[permission]]
+identifier = "allow-capacity-fetch"
+description = "Enables the capacity_fetch command (fetches the Capacity Monitor Slack file using the embedded token, kept in Rust)."
+commands.allow = ["capacity_fetch"]
+
+[[permission]]
+identifier = "allow-get-llm-config"
+description = "Enables the get_llm_config command (reports whether a Brain LLM key is embedded + which instance; never returns secrets)."
+commands.allow = ["get_llm_config"]
+
+[[permission]]
+identifier = "allow-llm-complete"
+description = "Enables the llm_complete command (calls the Brain LLM using the embedded key, kept in Rust)."
+commands.allow = ["llm_complete"]

@@ -11,6 +11,10 @@
     "allow-send-slack",
     "allow-get-send-config",
     "allow-get-looker-config",
-    "allow-looker-fetch"
+    "allow-looker-fetch",
+    "allow-get-capacity-config",
+    "allow-capacity-fetch",
+    "allow-get-llm-config",
+    "allow-llm-complete"
   ]
 }

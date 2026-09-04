@@ -141,6 +141,26 @@ const EMBED_LOOKER_SLACK_CHANNEL: &str = match option_env!("EMBED_LOOKER_SLACK_C
     Some(v) => v,
     None => "",
 };
+// Capacity Monitoring auto-fetch: the channel Helix posts the daily Capacity Monitor CSV
+// to, and a bot token with files:read. Token falls back to EMBED_SLACK_BOT_TOKEN when unset.
+const EMBED_CAPACITY_SLACK_CHANNEL: &str = match option_env!("EMBED_CAPACITY_SLACK_CHANNEL") {
+    Some(v) => v,
+    None => "",
+};
+const EMBED_CAPACITY_SLACK_BOT_TOKEN: &str = match option_env!("EMBED_CAPACITY_SLACK_BOT_TOKEN") {
+    Some(v) => v,
+    None => "",
+};
+// Brain LLM (AI narrative): an API key for the OpenAI-compatible Brain endpoint plus which
+// instance it targets ("stage" or "prod"). The key stays in Rust — never reaches the frontend.
+const EMBED_BRAIN_LLM_API_KEY: &str = match option_env!("EMBED_BRAIN_LLM_API_KEY") {
+    Some(v) => v,
+    None => "",
+};
+const EMBED_BRAIN_LLM_ENV: &str = match option_env!("EMBED_BRAIN_LLM_ENV") {
+    Some(v) => v,
+    None => "stage",
+};
 
 /// Tells the frontend which credentials are baked into this build,
 /// so it can hide the Sending Settings card. Never returns secret values.
@@ -339,6 +359,93 @@ async fn looker_fetch(url: String) -> Result<String, String> {
     Ok(text)
 }
 
+/// Non-secret Capacity config for the frontend: which channel to read + whether a token
+/// is available (so the fetch button can be enabled). No secrets.
+#[tauri::command]
+fn get_capacity_config() -> serde_json::Value {
+    serde_json::json!({
+        "channel": EMBED_CAPACITY_SLACK_CHANNEL,
+        "hasToken": !EMBED_CAPACITY_SLACK_BOT_TOKEN.is_empty() || !EMBED_SLACK_BOT_TOKEN.is_empty(),
+    })
+}
+
+/// GET a Slack URL using the embedded Capacity token, injected here so the token never
+/// reaches the frontend. Same success/error shape as looker_fetch.
+#[tauri::command]
+async fn capacity_fetch(url: String) -> Result<String, String> {
+    let token = if !EMBED_CAPACITY_SLACK_BOT_TOKEN.is_empty() {
+        EMBED_CAPACITY_SLACK_BOT_TOKEN.to_string()
+    } else {
+        EMBED_SLACK_BOT_TOKEN.to_string()
+    };
+    if token.is_empty() {
+        return Err("Capacity Slack token not configured (embed EMBED_CAPACITY_SLACK_BOT_TOKEN at build time)".to_string());
+    }
+
+    let mut builder = reqwest::Client::builder();
+    #[cfg(target_os = "macos")]
+    if let Some(proxy) = get_macos_system_proxy() {
+        builder = builder.proxy(proxy);
+    }
+    let client = builder.build().map_err(|e| e.to_string())?;
+
+    let response = client
+        .get(&url)
+        .header("Authorization", format!("Bearer {token}"))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let status = response.status();
+    let text = response.text().await.map_err(|e| e.to_string())?;
+
+    if !status.is_success() {
+        return Err(format!("HTTP {}: {}", status, text));
+    }
+    Ok(text)
+}
+
+/// Non-secret LLM config for the frontend: whether a Brain key is embedded + which instance
+/// (stage/prod) it targets. No secrets.
+#[tauri::command]
+fn get_llm_config() -> serde_json::Value {
+    serde_json::json!({
+        "hasKey": !EMBED_BRAIN_LLM_API_KEY.is_empty(),
+        "environment": EMBED_BRAIN_LLM_ENV,
+    })
+}
+
+/// POST an OpenAI-compatible chat-completions request to `url` with the raw JSON `body`,
+/// using the embedded Brain key injected here so the key never reaches the frontend.
+#[tauri::command]
+async fn llm_complete(url: String, body: String) -> Result<String, String> {
+    if EMBED_BRAIN_LLM_API_KEY.is_empty() {
+        return Err("Brain LLM key not configured (embed EMBED_BRAIN_LLM_API_KEY at build time)".to_string());
+    }
+
+    let mut builder = reqwest::Client::builder();
+    #[cfg(target_os = "macos")]
+    if let Some(proxy) = get_macos_system_proxy() {
+        builder = builder.proxy(proxy);
+    }
+    let client = builder.build().map_err(|e| e.to_string())?;
+
+    let response = client
+        .post(&url)
+        .header("Content-Type", "application/json")
+        .header("Authorization", format!("Bearer {}", EMBED_BRAIN_LLM_API_KEY))
+        .body(body)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let status = response.status();
+    let text = response.text().await.map_err(|e| e.to_string())?;
+
+    if !status.is_success() {
+        return Err(format!("HTTP {}: {}", status, text));
+    }
+    Ok(text)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -349,7 +456,11 @@ pub fn run() {
             send_slack,
             get_send_config,
             get_looker_config,
-            looker_fetch
+            looker_fetch,
+            get_capacity_config,
+            capacity_fetch,
+            get_llm_config,
+            llm_complete
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
