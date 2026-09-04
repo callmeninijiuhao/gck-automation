@@ -15,6 +15,9 @@ fn embed_build_secrets() {
         "EMBED_EMAIL_USER",
         "EMBED_EMAIL_PASSWORD",
         "EMBED_SLACK_BOT_TOKEN",
+        // Looker Slack auto-fetch (Top Bundle) — must match the option_env! keys in lib.rs.
+        "EMBED_LOOKER_SLACK_CHANNEL",
+        "EMBED_LOOKER_SLACK_BOT_TOKEN",
     ];
 
     if let Ok(content) = fs::read_to_string(&path) {
